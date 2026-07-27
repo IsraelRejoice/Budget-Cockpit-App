@@ -7,8 +7,10 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0A0F1C">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@1,600;1,700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
@@ -75,6 +77,17 @@ body{min-height:100vh; padding-bottom:92px;}
 .gauge-stat b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
 
 /* Budget check banner */
+/* Payday card */
+.payday-card{margin:14px 20px 0;background:linear-gradient(135deg,var(--panel-2),var(--panel));border:1px solid var(--line);
+  border-radius:16px;padding:14px 16px;}
+.payday-row{display:flex;align-items:center;justify-content:space-between;}
+.payday-item{flex:1;text-align:center;}
+.payday-lbl{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.payday-val{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;}
+.payday-arrow{color:var(--gold);font-size:14px;flex:none;padding:0 6px;}
+.payday-countdown{margin-top:10px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:13px;
+  color:var(--gold);font-weight:700;letter-spacing:.02em;padding-top:10px;border-top:1px solid var(--line);}
+
 .budget-check{margin:10px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
   display:flex;justify-content:space-between;align-items:center;font-size:12px;}
 .budget-check.over{border-color:var(--red);background:rgba(255,107,107,.08);}
@@ -92,13 +105,19 @@ body{min-height:100vh; padding-bottom:92px;}
 .sts-cap{font-size:8.5px;color:var(--muted-2);margin-top:2px;line-height:1.3;}
 
 /* Quote card */
-.quote-card{margin:14px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  padding:16px 16px;position:relative;}
-.quote-eyebrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
-.quote-eyebrow span{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
-.quote-refresh{background:none;border:none;color:var(--gold);font-size:12px;cursor:pointer;padding:2px 4px;}
-.quote-text{font-size:13px;line-height:1.5;font-style:italic;color:var(--text);}
-.quote-author{font-size:11px;color:var(--muted);margin-top:8px;text-align:right;}
+.quote-card{margin:14px 20px 0;border-radius:18px;padding:20px 18px 18px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg, rgba(232,177,76,.14), rgba(63,199,176,.10) 60%, var(--panel) 100%);
+  border:1px solid var(--line);}
+.quote-mark{position:absolute;top:-18px;left:8px;font-family:'Playfair Display',serif;font-size:110px;font-weight:700;
+  color:var(--gold);opacity:.14;line-height:1;pointer-events:none;user-select:none;}
+.quote-eyebrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;position:relative;z-index:1;}
+.quote-eyebrow span{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:600;}
+.quote-refresh{background:rgba(232,177,76,.12);border:1px solid rgba(232,177,76,.3);color:var(--gold);font-size:11px;
+  cursor:pointer;padding:4px 9px;border-radius:20px;font-weight:600;}
+.quote-text{font-family:'Playfair Display',serif;font-style:italic;font-weight:600;font-size:16px;line-height:1.45;
+  color:var(--text);position:relative;z-index:1;}
+.quote-author{font-size:11px;color:var(--gold);margin-top:10px;text-align:right;position:relative;z-index:1;
+  font-weight:600;letter-spacing:.03em;}
 
 /* Section headers */
 .section{margin:26px 20px 10px;display:flex;align-items:center;justify-content:space-between;}
@@ -300,6 +319,21 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
+    <div class="payday-card">
+      <div class="payday-row">
+        <div class="payday-item">
+          <div class="payday-lbl">Last payday</div>
+          <div class="payday-val" id="lastPaydayVal">—</div>
+        </div>
+        <div class="payday-arrow">→</div>
+        <div class="payday-item">
+          <div class="payday-lbl">Next payday</div>
+          <div class="payday-val" id="nextPaydayVal">—</div>
+        </div>
+      </div>
+      <div class="payday-countdown" id="paydayCountdown">—</div>
+    </div>
+
     <div class="budget-check" id="budgetCheck">
       <span class="lbl">Total budgeted (all categories)</span>
       <span class="val" id="budgetCheckVal">—</span>
@@ -322,8 +356,9 @@ body{min-height:100vh; padding-bottom:92px;}
     </div>
 
     <div class="quote-card">
+      <div class="quote-mark">"</div>
       <div class="quote-eyebrow">
-        <span>Money thought for today</span>
+        <span>✦ Money thought for today</span>
         <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
       </div>
       <div class="quote-text" id="quoteText">Loading…</div>
@@ -475,6 +510,27 @@ body{min-height:100vh; padding-bottom:92px;}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:-4px 20px 10px;line-height:1.5;">All budgets start at ₦0 — set your own figures. See the Guide tab for typical percentage ranges.</p>
     <div id="settingsCatList" style="margin:0 20px;"></div>
+
+    <div style="margin:0 20px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Add a new category</div>
+      <div class="settings-row" style="margin-bottom:10px;">
+        <div class="field" style="margin-bottom:0;flex:2;">
+          <label>Name</label>
+          <input type="text" id="newCatName" placeholder="e.g. Pet care">
+        </div>
+        <div class="field" style="margin-bottom:0;flex:1;">
+          <label>Group</label>
+          <select id="newCatGroup">
+            <option value="Needs">Needs</option>
+            <option value="Wants" selected>Wants</option>
+            <option value="Savings">Savings</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="addCatBtn">Add category</button>
+    </div>
+
+    <button class="btn btn-danger" id="resetBudgetsBtn" style="margin:0 20px 20px;width:calc(100% - 40px);">Reset all budgets to ₦0</button>
 
     <div class="section"><h2>Monthly report</h2></div>
     <div style="margin:0 20px 20px;">
@@ -697,7 +753,7 @@ let state = {
 /* ============================================================
    BACKEND CONFIG
    ============================================================ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwW8NdhL066LtcUCYPrNuPesWF-87y-poiJ-T-04X5b6kGKzqnZt92qTtofabayooIN/exec'; // e.g. 'https://script.google.com/macros/s/AKfycb.../exec'
+const API_URL = 'https://script.google.com/macros/s/AKfycbwW8NdhL066LtcUCYPrNuPesWF-87y-poiJ-T-04X5b6kGKzqnZt92qTtofabayooIN/exec';
 const API_TOKEN = ''; // must match API_TOKEN in Code.gs exactly, or leave both blank
 const STORAGE_KEY = 'budget-cockpit-state';
 
@@ -814,14 +870,39 @@ document.getElementById('themeOptDark').addEventListener('click', ()=>{ state.th
 document.getElementById('themeOptLight').addEventListener('click', ()=>{ state.theme='light'; applyTheme('light'); saveState(); });
 
 /* ============================================================
-   LIVE CLOCK
+   LIVE CLOCK + PAYDAY COUNTDOWN
    ============================================================ */
+function formatPaydayFull(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const weekday = d.toLocaleDateString('en-GB', {weekday:'long'});
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-GB', {month:'long'});
+  const suffix = (day%10===1 && day!==11) ? 'st' : (day%10===2 && day!==12) ? 'nd' : (day%10===3 && day!==13) ? 'rd' : 'th';
+  return weekday + ', ' + day + suffix + ' ' + month;
+}
+function updatePaydayCard(){
+  document.getElementById('lastPaydayVal').textContent = formatPaydayFull(state.lastPayDate);
+  document.getElementById('nextPaydayVal').textContent = formatPaydayFull(state.nextPayDate);
+
+  const next = new Date(state.nextPayDate+'T00:00:00');
+  const now = new Date();
+  const msLeft = next - now;
+  const cd = document.getElementById('paydayCountdown');
+  if(msLeft <= 0){ cd.textContent = 'Payday is today! 🎉'; return; }
+  const totalSec = Math.floor(msLeft/1000);
+  const days = Math.floor(totalSec/86400);
+  const hours = Math.floor((totalSec%86400)/3600);
+  const mins = Math.floor((totalSec%3600)/60);
+  const secs = totalSec%60;
+  cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
+}
 function startClock(){
   function tick(){
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
     const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
     document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
+    updatePaydayCard();
   }
   tick();
   setInterval(tick, 1000);
@@ -1179,7 +1260,11 @@ function renderSettings(){
     div.className = 'settings-cat';
     const isSavings = cat.group === 'Savings';
     div.innerHTML = `
-      <div class="settings-cat-name">${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></div>
+      <div class="settings-cat-name" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></span>
+        <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category"
+          style="background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px;">🗑</button>
+      </div>
       <div class="settings-row">
         <div class="field">
           <label>${isSavings ? 'Per-cycle target ₦' : 'Budget ₦'}</label>
@@ -1214,6 +1299,20 @@ function renderSettings(){
     inp.addEventListener('change', e=>{
       catById(e.target.dataset.id).goal = Math.max(Number(e.target.value)||0, 0);
       saveState(); renderAll();
+    });
+  });
+  wrap.querySelectorAll('.cat-delete').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.id;
+      const spent = spentFor(id);
+      const msg = spent > 0
+        ? `"${btn.dataset.name}" has ${fmt(spent)} logged against it this cycle. Deleting it will leave those transactions uncategorized (they won't be removed). Continue?`
+        : `Delete "${btn.dataset.name}"? This can't be undone.`;
+      const ok = await askConfirm('Delete category?', msg);
+      if(!ok) return;
+      state.categories = state.categories.filter(c=>c.id!==id);
+      saveState(); renderAll();
+      showToast('Category deleted');
     });
   });
 }
@@ -1334,6 +1433,33 @@ document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
   document.getElementById('incomeInput').value = '';
   document.getElementById('emailInput').value = '';
   showToast('Saved');
+});
+
+document.getElementById('addCatBtn').addEventListener('click', ()=>{
+  const name = document.getElementById('newCatName').value.trim();
+  const group = document.getElementById('newCatGroup').value;
+  if(!name){ showToast('Enter a category name'); return; }
+
+  const baseId = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'category';
+  let id = baseId, n = 1;
+  while(catById(id)){ id = baseId + '-' + (++n); }
+
+  const newCat = group === 'Savings'
+    ? { id, name, group, budget:0, threshold:null, goal:0 }
+    : { id, name, group, budget:0, threshold:0.85 };
+  state.categories.push(newCat);
+  saveState(); renderAll();
+  document.getElementById('newCatName').value = '';
+  showToast('"' + name + '" added');
+});
+
+document.getElementById('resetBudgetsBtn').addEventListener('click', async ()=>{
+  const ok = await askConfirm('Reset all budgets to ₦0?',
+    'This clears the Budget/Target amount on every category (Needs, Wants, and Savings). Category names, alert %, and goals are kept. This can\'t be undone.');
+  if(!ok) return;
+  state.categories.forEach(c => c.budget = 0);
+  saveState(); renderAll();
+  showToast('All budgets reset to ₦0');
 });
 
 /* ============================================================
