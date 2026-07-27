@@ -6,7 +6,7 @@
 
 const CACHE_NAME = 'budget-cockpit-v1';
 const APP_SHELL = [
-  './budget_app.html',
+  './index.html',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
