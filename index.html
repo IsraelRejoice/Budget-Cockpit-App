@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Budget Cockpit — Personal Finance Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A0F1C">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -327,6 +330,14 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="quote-author" id="quoteAuthor"></div>
     </div>
 
+    <div class="quote-card" id="askAiCard" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div class="quote-eyebrow"><span>AI assistant</span></div>
+        <div style="font-size:12.5px;color:var(--muted);">Ask about your spending, budget, or savings this cycle</div>
+      </div>
+      <div style="font-size:20px;">🤖</div>
+    </div>
+
     <div class="section"><h2>Extra income this cycle</h2><span class="tag" id="extraTag">₦0 added</span></div>
     <div class="extra-list" id="extraList"></div>
     <button class="add-extra-btn" id="addExtraBtn">+ Add extra income (bonus, side hustle, gift…)</button>
@@ -351,6 +362,18 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="header"><div><div class="eyebrow">Budget Cockpit</div><div class="h1">History</div></div></div>
     <div class="hist-summary" id="histSummary"></div>
     <div id="histChartWrap"></div>
+    <div class="section"><h2>Past cycles</h2><span class="tag" id="pastCyclesTag"></span></div>
+    <div class="tx-list" id="pastCyclesList" style="margin-bottom:8px;"></div>
+
+    <div class="section"><h2>Year-end review</h2></div>
+    <div style="margin:0 20px 20px;display:flex;gap:8px;align-items:flex-end;">
+      <div class="field" style="margin-bottom:0;flex:1;">
+        <label>Year</label>
+        <select id="yearSelect"></select>
+      </div>
+      <button class="btn btn-teal" id="yearReportBtn" style="width:auto;padding:12px 16px;">Generate</button>
+    </div>
+
     <div class="section"><h2>All transactions this cycle</h2><span class="tag" id="txTagFull"></span></div>
     <div class="tx-list" id="txListFull"></div>
   </div>
@@ -533,10 +556,16 @@ body{min-height:100vh; padding-bottom:92px;}
 <!-- Report sheet -->
 <div class="sheet" id="reportSheet">
   <div class="sheet-handle"></div>
-  <h3>Cycle report</h3>
+  <h3 id="reportTitle">Cycle report</h3>
   <div class="report-charts">
-    <canvas id="reportPieCanvas" width="200" height="180"></canvas>
-    <canvas id="reportBarCanvas" width="200" height="180"></canvas>
+    <div style="flex:1;min-width:120px;">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px;" id="reportPieLabel">By category</div>
+      <canvas id="reportPieCanvas" width="200" height="180"></canvas>
+    </div>
+    <div style="flex:1;min-width:120px;">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px;" id="reportBarLabel">Daily spend</div>
+      <canvas id="reportBarCanvas" width="200" height="180"></canvas>
+    </div>
   </div>
   <div class="field">
     <textarea id="reportText" rows="12" readonly></textarea>
@@ -547,6 +576,23 @@ body{min-height:100vh; padding-bottom:92px;}
   </div>
   <button class="btn btn-ghost" id="emailReportBtn">Email it</button>
   <button class="btn btn-ghost" id="reportCloseBtn">Close</button>
+</div>
+
+
+<!-- AI assistant sheet -->
+<div class="sheet" id="aiSheet">
+  <div class="sheet-handle"></div>
+  <h3>AI assistant</h3>
+  <p style="font-size:11.5px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
+    Answers are based on this cycle's numbers. This isn't financial advice — just a quick sounding board.</p>
+  <div class="field">
+    <textarea id="aiAnswer" rows="7" readonly placeholder="Ask something below — e.g. \"Am I overspending on transport?\" or \"How much more can I save this cycle?\""></textarea>
+  </div>
+  <div class="field">
+    <input type="text" id="aiQuestion" placeholder="Type your question...">
+  </div>
+  <button class="btn btn-teal" id="aiAskBtn">Ask</button>
+  <button class="btn btn-ghost" id="aiCloseBtn">Close</button>
 </div>
 
 <!-- Custom confirm modal -->
@@ -715,6 +761,7 @@ function spendingCategories(){ return state.categories.filter(c=>c.group!=='Savi
 function savingsCategories(){ return state.categories.filter(c=>c.group==='Savings'); }
 
 function spentFor(catId){ return state.transactions.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
+function spentForIn(txs, catId){ return txs.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
 
 function totalSpent(){
   return state.transactions.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
@@ -816,8 +863,7 @@ document.getElementById('refreshQuoteBtn').addEventListener('click', loadQuote);
 /* ============================================================
    STATUS LOGIC
    ============================================================ */
-function statusFor(cat){
-  const s = spentFor(cat.id);
+function statusForAmt(cat, s){
   if(cat.threshold==null){
     if(cat.budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
     return s>=cat.budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
@@ -827,6 +873,7 @@ function statusFor(cat){
   if(s/cat.budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
   return {label:'On track', cls:'st-ok'};
 }
+function statusFor(cat){ return statusForAmt(cat, spentFor(cat.id)); }
 function barColor(status){
   if(status.cls==='st-over') return 'var(--red)';
   if(status.cls==='st-near') return 'var(--amber)';
@@ -1072,7 +1119,43 @@ function renderHistory(){
   document.getElementById('txTagFull').textContent = sorted.length + ' logged';
   txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">No expenses logged this cycle yet.</div>';
   sorted.forEach(t=>renderTxRow(txWrap, t, true));
+
+  renderPastCycles();
+  renderYearSelect();
 }
+
+function renderPastCycles(){
+  const wrap = document.getElementById('pastCyclesList');
+  document.getElementById('pastCyclesTag').textContent = state.history.length + ' archived';
+  if(!state.history.length){ wrap.innerHTML = '<div class="empty-hist">No archived cycles yet — use "Archive this cycle" in Settings once a pay cycle ends.</div>'; return; }
+  wrap.innerHTML = '';
+  [...state.history].reverse().forEach(h=>{
+    const row = document.createElement('div');
+    row.className = 'tx-row';
+    row.innerHTML = `
+      <div class="tx-left">
+        <div class="tx-cat">${escapeHtml(h.label)}</div>
+        <div class="tx-desc">Income ${fmt(h.income)} · Spent ${fmt(h.totalSpent)}</div>
+      </div>
+      <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
+    `;
+    row.querySelector('button').addEventListener('click', ()=> openReportForHistory(h));
+    wrap.appendChild(row);
+  });
+}
+
+function renderYearSelect(){
+  const sel = document.getElementById('yearSelect');
+  const current = sel.value;
+  const years = availableYears();
+  sel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  if(years.includes(current)) sel.value = current;
+}
+document.getElementById('yearReportBtn').addEventListener('click', ()=>{
+  const year = document.getElementById('yearSelect').value;
+  if(!year){ showToast('No year selected'); return; }
+  openYearReport(year);
+});
 
 /* ============================================================
    RENDER: SETTINGS
@@ -1204,6 +1287,36 @@ document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
 });
 
 /* ============================================================
+   AI ASSISTANT
+   ============================================================ */
+const aiSheet = document.getElementById('aiSheet');
+document.getElementById('askAiCard').addEventListener('click', ()=>{
+  if(!API_URL){
+    showToast('Connect a backend first (see Settings) — the AI assistant needs one');
+    return;
+  }
+  activeSheet = aiSheet; openSheetEl(aiSheet);
+});
+document.getElementById('aiCloseBtn').addEventListener('click', ()=>{ closeSheetEl(aiSheet); activeSheet=null; });
+document.getElementById('aiAskBtn').addEventListener('click', async ()=>{
+  const q = document.getElementById('aiQuestion').value.trim();
+  const answerBox = document.getElementById('aiAnswer');
+  if(!q){ showToast('Type a question first'); return; }
+  answerBox.value = 'Thinking…';
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action:'askAI', question: q, token: API_TOKEN})
+    });
+    const data = await res.json();
+    answerBox.value = data.answer || data.error || 'No response — try again.';
+  }catch(e){
+    answerBox.value = 'Could not reach the AI assistant — check your connection.';
+  }
+});
+
+/* ============================================================
    SETTINGS ACTIONS
    ============================================================ */
 document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
@@ -1226,33 +1339,35 @@ document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
 /* ============================================================
    REPORT: DATA + CHARTS + PDF
    ============================================================ */
-function buildReportData(){
-  const income = combinedIncome();
-  const spent = totalSpent();
-  const budget = totalBudget();
-  const savingsContrib = savingsContribThisCycle();
+function buildReportData(snapshot){
+  const txs = snapshot ? snapshot.transactions : state.transactions;
+  const income = snapshot ? snapshot.income : combinedIncome();
+  const spent = txs.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
+  const budget = snapshot ? (snapshot.budget!=null ? snapshot.budget : 0) : totalBudget();
+  const savingsContrib = txs.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
   const remaining = Math.max(income - spent - savingsContrib, 0);
   const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
 
-  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentFor(c.id), budget:c.budget }))
+  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(txs,c.id), budget:c.budget }))
     .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
 
   const byDay = {};
-  state.transactions.filter(t=>!isSavingsCat(t.categoryId)).forEach(t=>{ byDay[t.date] = (byDay[t.date]||0) + Number(t.amount); });
+  txs.filter(t=>!isSavingsCat(t.categoryId)).forEach(t=>{ byDay[t.date] = (byDay[t.date]||0) + Number(t.amount); });
   const dailyEntries = Object.keys(byDay).sort().map(d=>({date:d, amount:byDay[d]}));
   const highestDay = dailyEntries.slice().sort((a,b)=>b.amount-a.amount)[0];
 
-  const overBudget = state.categories.filter(c => statusFor(c).cls==='st-over');
-  const nearLimit = state.categories.filter(c => statusFor(c).cls==='st-near');
+  const overBudget = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-over');
+  const nearLimit = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-near');
 
   return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit };
 }
 
-function generateReportText(d){
+function generateReportText(d, periodLabel, note){
   const lines = [];
-  lines.push('BUDGET COCKPIT — CYCLE REPORT');
-  lines.push('Cycle: ' + cycleLabelText());
+  lines.push('BUDGET COCKPIT — REPORT');
+  lines.push(periodLabel || ('Cycle: ' + cycleLabelText()));
   lines.push('Generated: ' + new Date().toLocaleString('en-GB'));
+  if(note) lines.push(note);
   lines.push('');
   lines.push('INCOME & SPENDING');
   lines.push('Total income: ' + fmt(d.income));
@@ -1262,7 +1377,7 @@ function generateReportText(d){
   lines.push('Remaining to spend: ' + fmt(d.remaining));
   lines.push('');
   lines.push('TOP SPENDING CATEGORIES');
-  if(d.spentByCat.length===0) lines.push('No expenses logged this cycle.');
+  if(d.spentByCat.length===0) lines.push('No expenses logged this period.');
   d.spentByCat.slice(0,3).forEach((x,i)=> lines.push((i+1) + '. ' + x.name + ': ' + fmt(x.spent) + (x.budget>0 ? ' of ' + fmt(x.budget) + ' budgeted' : ' (no budget set)')));
   lines.push('');
   if(d.highestDay) lines.push('Highest single-day spend: ' + d.highestDay.date + ' (' + fmt(d.highestDay.amount) + ')');
@@ -1325,13 +1440,91 @@ function drawBarChart(canvas, entries){
 }
 
 const reportSheet = document.getElementById('reportSheet');
-function openReport(){
-  const d = buildReportData();
-  document.getElementById('reportText').value = generateReportText(d);
+let currentReportFilename = 'budget-report';
+let currentPeriodLabel = '';
+
+function showReport(d, opts){
+  opts = opts || {};
+  document.getElementById('reportTitle').textContent = opts.title || 'Cycle report';
+  document.getElementById('reportPieLabel').textContent = 'By category' + (opts.pieNote ? ' (' + opts.pieNote + ')' : '');
+  document.getElementById('reportBarLabel').textContent = opts.barLabel || 'Daily spend';
+  document.getElementById('reportText').value = generateReportText(d, opts.periodLabel, opts.note);
   drawPieChart(document.getElementById('reportPieCanvas'), d.spentByCat);
   drawBarChart(document.getElementById('reportBarCanvas'), d.dailyEntries);
+  currentReportFilename = opts.filename || 'budget-report';
+  currentPeriodLabel = opts.periodLabel || ('Cycle: ' + cycleLabelText());
   activeSheet = reportSheet; openSheetEl(reportSheet);
 }
+
+function openReport(){
+  const d = buildReportData();
+  showReport(d, {
+    title: 'Cycle report',
+    periodLabel: 'Cycle: ' + cycleLabelText(),
+    barLabel: 'Daily spend',
+    filename: 'budget-report-' + state.nextPayDate
+  });
+}
+
+// Past cycle: rebuilt from the transaction snapshot captured at archive time.
+// Note: uses that cycle's own budget total, but current category names/order —
+// a category renamed since then will show under its current name.
+function openReportForHistory(h){
+  const snapshot = {
+    transactions: h.transactions || [],
+    extraIncome: h.extraIncome || [],
+    income: h.income,
+    budget: h.totalBudget
+  };
+  const d = buildReportData(snapshot);
+  const hasDetail = (h.transactions||[]).length > 0 || (h.totalSpent||0) === 0;
+  showReport(d, {
+    title: 'Past cycle report',
+    periodLabel: 'Cycle: ' + h.label,
+    barLabel: 'Daily spend',
+    note: hasDetail ? null : 'Note: detailed transaction breakdown wasn\'t saved for this cycle (archived with an older version) — totals only.',
+    filename: 'budget-report-' + h.label.replace(/[^\d]+/g,'-')
+  });
+}
+
+// Year-end: aggregates every archived cycle whose archive date falls in the chosen year.
+function availableYears(){
+  const years = new Set();
+  state.history.forEach(h=>{ if(h.archivedAt) years.add(h.archivedAt.slice(0,4)); });
+  const thisYear = String(new Date().getFullYear());
+  years.add(thisYear);
+  return [...years].sort().reverse();
+}
+function openYearReport(year){
+  const entries = state.history.filter(h => (h.archivedAt||'').slice(0,4) === String(year));
+  const income = entries.reduce((s,h)=>s+Number(h.income||0),0);
+  const budget = entries.reduce((s,h)=>s+Number(h.totalBudget||0),0);
+  const savingsContrib = entries.reduce((s,h)=>s+Number(h.savingsContributed||0),0);
+
+  const allTx = [];
+  entries.forEach(h => (h.transactions||[]).forEach(t => allTx.push(t)));
+  const spent = allTx.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
+  const remaining = Math.max(income - spent - savingsContrib, 0);
+  const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
+
+  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(allTx,c.id), budget:0 }))
+    .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
+
+  // Bar chart here shows spend per archived cycle across the year, not per day
+  const dailyEntries = entries.map(h=>({date:(h.archivedAt||'').slice(5,10)||h.label.slice(0,5), amount:Number(h.totalSpent||0)}));
+
+  const d = { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay:null, overBudget:[], nearLimit:[] };
+
+  showReport(d, {
+    title: 'Year-end review — ' + year,
+    periodLabel: 'Period: Year ' + year + ' (' + entries.length + ' archived cycle' + (entries.length===1?'':'s') + ')',
+    pieNote: 'whole year',
+    barLabel: 'Spend per archived cycle',
+    note: entries.length===0 ? 'No cycles archived in ' + year + ' yet.' : null,
+    filename: 'budget-year-review-' + year
+  });
+}
+
 document.getElementById('reportBtn').addEventListener('click', openReport);
 document.getElementById('reportCloseBtn').addEventListener('click', ()=>{ closeSheetEl(reportSheet); activeSheet=null; });
 document.getElementById('copyReportBtn').addEventListener('click', async ()=>{
@@ -1345,7 +1538,7 @@ document.getElementById('copyReportBtn').addEventListener('click', async ()=>{
 });
 document.getElementById('emailReportBtn').addEventListener('click', ()=>{
   const to = state.email || '';
-  const subject = encodeURIComponent('Budget Cockpit — Cycle Report (' + cycleLabelText() + ')');
+  const subject = encodeURIComponent('Budget Cockpit — ' + document.getElementById('reportTitle').textContent + ' (' + currentPeriodLabel + ')');
   const body = encodeURIComponent(document.getElementById('reportText').value);
   window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
 });
@@ -1353,20 +1546,20 @@ document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
   try{
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-    doc.setFontSize(16); doc.text('Budget Cockpit — Cycle Report', 14, 18);
-    doc.setFontSize(10); doc.setTextColor(120); doc.text(cycleLabelText(), 14, 25);
+    doc.setFontSize(16); doc.text('Budget Cockpit — ' + document.getElementById('reportTitle').textContent, 14, 18);
+    doc.setFontSize(10); doc.setTextColor(120); doc.text(currentPeriodLabel, 14, 25);
     doc.setTextColor(0);
     doc.setFontSize(10);
     const lines = doc.splitTextToSize(document.getElementById('reportText').value, 180);
     doc.text(lines, 14, 34);
     let y = 34 + lines.length*4.2 + 8;
     if(y > 230){ doc.addPage(); y = 20; }
-    doc.setFontSize(11); doc.text('Spending by category', 14, y);
-    doc.text('Daily spend', 110, y);
+    doc.setFontSize(11); doc.text(document.getElementById('reportPieLabel').textContent, 14, y);
+    doc.text(document.getElementById('reportBarLabel').textContent, 110, y);
     y += 4;
     doc.addImage(document.getElementById('reportPieCanvas').toDataURL('image/png'), 'PNG', 14, y, 88, 66);
     doc.addImage(document.getElementById('reportBarCanvas').toDataURL('image/png'), 'PNG', 108, y, 88, 66);
-    doc.save('budget-report-' + state.nextPayDate + '.pdf');
+    doc.save(currentReportFilename + '.pdf');
     showToast('PDF downloaded');
   }catch(e){
     showToast('Could not generate PDF — try Copy instead');
@@ -1401,31 +1594,52 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
     'This saves ' + cycleLabelText() + ' to History, folds savings contributions into your lifetime totals, and clears transactions + extra income. Category budgets and goals stay the same.');
   if(!ok) return;
 
+  const closedLabel = cycleLabelText();
   const d = buildReportData();
-  state.history.push({ label: cycleLabelText(), income: d.income, totalBudget: d.budget, totalSpent: d.spent, savingsContributed: d.savingsContrib });
+  state.history.push({
+    label: closedLabel,
+    income: d.income, totalBudget: d.budget, totalSpent: d.spent, savingsContributed: d.savingsContrib,
+    archivedAt: toDateInput(new Date()),
+    transactions: JSON.parse(JSON.stringify(state.transactions)),
+    extraIncome: JSON.parse(JSON.stringify(state.extraIncome))
+  });
 
   savingsCategories().forEach(c=>{
     const contributed = spentFor(c.id);
     state.savingsAccumulated[c.id] = (state.savingsAccumulated[c.id]||0) + contributed;
   });
 
-  const reportText = generateReportText(d);
   state.transactions = [];
   state.extraIncome = [];
 
   saveState(); renderAll();
   showToast('Cycle archived — fresh start!');
 
-  document.getElementById('reportText').value = reportText;
-  drawPieChart(document.getElementById('reportPieCanvas'), d.spentByCat);
-  drawBarChart(document.getElementById('reportBarCanvas'), d.dailyEntries);
-  activeSheet = reportSheet; openSheetEl(reportSheet);
+  showReport(d, {
+    title: 'Cycle report',
+    periodLabel: 'Cycle: ' + closedLabel,
+    barLabel: 'Daily spend',
+    filename: 'budget-report-' + closedLabel.replace(/[^\d]+/g,'-')
+  });
 });
 
 /* ============================================================
    INIT
    ============================================================ */
 loadState();
+
+/* ============================================================
+   PWA — register service worker (safe no-op if hosted somewhere
+   that can't serve sw.js, e.g. this preview inside Claude)
+   ============================================================ */
+if('serviceWorker' in navigator && location.protocol !== 'about:'){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // No service worker available here (e.g. previewing inside Claude,
+      // or opened as a local file) — app still works fully online.
+    });
+  });
+}
 </script>
 </body>
 </html>
