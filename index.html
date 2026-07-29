@@ -11,7 +11,7 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@1,600;1,700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- jsPDF is lazy-loaded on demand (see loadJsPdf()) instead of blocking initial page load -->
 <style>
 :root{
   --bg:#0A0F1C;
@@ -214,6 +214,14 @@ body{min-height:100vh; padding-bottom:92px;}
 .tx-del{background:none;border:none;color:var(--muted-2);font-size:16px;padding:0 0 0 10px;cursor:pointer;}
 .tx-tag-savings{font-size:9px;color:var(--teal);font-weight:600;margin-left:6px;}
 
+/* Swipe-to-reveal (mobile: swipe a row left to reveal Edit/Delete) */
+.tx-swipe-wrap{position:relative;overflow:hidden;border-radius:12px;}
+.tx-swipe-actions{position:absolute;top:0;right:0;bottom:0;display:flex;z-index:0;}
+.tx-swipe-btn{width:38px;border:none;font-size:15px;cursor:pointer;color:#fff;}
+.tx-swipe-edit{background:var(--gold);}
+.tx-swipe-del{background:var(--red);}
+.tx-swipe-wrap .tx-row{position:relative;z-index:1;}
+
 /* Guide tab */
 .guide-block{margin:0 20px 22px;}
 .guide-block h3{font-family:'Space Grotesk',sans-serif;font-size:14px;margin:0 0 8px;color:var(--gold);}
@@ -243,6 +251,44 @@ body{min-height:100vh; padding-bottom:92px;}
   background:linear-gradient(135deg,var(--gold),#c98f2e);border:none;color:#1a1200;font-size:26px;font-weight:700;
   box-shadow:0 8px 24px rgba(232,177,76,.35);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;}
 @media (max-width:520px){.fab{right:20px;}}
+
+.ai-fab{position:fixed;bottom:78px;left:calc(50% - 240px + 20px);width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(135deg,var(--teal),#1c8f78 55%,var(--gold));border:none;color:#06231e;
+  box-shadow:0 8px 24px rgba(63,199,176,.4);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;
+  animation:aiPulse 2.6s ease-in-out infinite;}
+@media (max-width:520px){.ai-fab{left:20px;}}
+.ai-fab-icon{font-size:24px;animation:aiSpin 6s linear infinite;}
+@keyframes aiPulse{
+  0%,100%{ box-shadow:0 8px 24px rgba(63,199,176,.4), 0 0 0 0 rgba(63,199,176,.5); }
+  50%{ box-shadow:0 8px 28px rgba(63,199,176,.55), 0 0 0 10px rgba(63,199,176,0); }
+}
+@keyframes aiSpin{
+  0%,85%{ transform:rotate(0deg); }
+  100%{ transform:rotate(360deg); }
+}
+
+/* AI chat sheet */
+.ai-sheet{max-height:82vh;display:flex;flex-direction:column;}
+.ai-sheet-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.ai-avatar{width:34px;height:34px;border-radius:50%;flex:none;
+  background:linear-gradient(135deg,var(--teal),var(--gold));color:#06231e;font-size:16px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;}
+.ai-clear-btn{margin-left:auto;background:none;border:none;color:var(--muted-2);font-size:14px;cursor:pointer;}
+.ai-chat{flex:1;overflow-y:auto;min-height:180px;max-height:44vh;display:flex;flex-direction:column;gap:10px;
+  padding:4px 2px 10px;}
+.ai-bubble{max-width:85%;padding:10px 13px;border-radius:14px;font-size:12.5px;line-height:1.5;}
+.ai-bubble.user{align-self:flex-end;background:linear-gradient(135deg,var(--gold),#c98f2e);color:#1a1200;
+  border-bottom-right-radius:4px;}
+.ai-bubble.bot{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+  border-bottom-left-radius:4px;}
+.ai-bubble.bot.error{border-color:rgba(255,107,107,.4);color:var(--red);}
+.ai-empty{text-align:center;color:var(--muted);font-size:12px;padding:30px 20px;}
+.ai-input-row{display:flex;gap:8px;align-items:center;}
+.ai-input-row input{flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:24px;
+  color:var(--text);font-family:'Inter',sans-serif;font-size:14px;padding:12px 16px;}
+.ai-input-row input:focus{outline:none;border-color:var(--teal);}
+.ai-send-btn{width:44px;height:44px;border-radius:50%;flex:none;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;font-size:16px;}
 
 /* Sheet / Modal */
 .overlay{position:fixed;inset:0;background:rgba(4,6,12,.6);backdrop-filter:blur(2px);z-index:30;
@@ -306,6 +352,26 @@ body{min-height:100vh; padding-bottom:92px;}
 
 .report-charts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
 .report-charts canvas{background:var(--panel-2);border-radius:10px;border:1px solid var(--line);max-width:100%;}
+/* Hover states — desktop/web only, never affects touch devices */
+@media (hover:hover) and (pointer:fine){
+  .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
+  .btn:hover{transform:translateY(-1px); filter:brightness(1.06);}
+  .btn-primary:hover, .btn-teal:hover{box-shadow:0 6px 16px rgba(232,177,76,.25);}
+  .cat, .save-card, .debt-card, .hist-card, .faq-item, .note-item, .extra-row, .tx-row{
+    transition:transform .15s ease, border-color .15s ease;}
+  .cat:hover, .save-card:hover, .debt-card:hover, .hist-card:hover{
+    transform:translateY(-2px); border-color:var(--gold);}
+  .tx-row:hover{border-color:var(--gold);}
+  .nav-btn{transition:color .15s ease, transform .15s ease;}
+  .nav-btn:hover{color:var(--gold); transform:translateY(-1px);}
+  .theme-toggle:hover, .ai-fab:hover, .fab:hover, .ai-send-btn:hover, .quote-refresh:hover{
+    transform:scale(1.06); transition:transform .15s ease;}
+  .theme-opt{transition:border-color .15s ease, color .15s ease;}
+  .theme-opt:hover{border-color:var(--gold); color:var(--gold);}
+  .section .link-btn:hover{text-decoration:underline;}
+  .cat-delete:hover, .tx-del:hover{opacity:.7;}
+  .debt-actions button:hover{filter:brightness(1.08);}
+}
 </style>
 </head>
 <body>
@@ -391,14 +457,6 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="quote-author" id="quoteAuthor"></div>
     </div>
 
-    <div class="quote-card" id="askAiCard" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-      <div>
-        <div class="quote-eyebrow"><span>AI assistant</span></div>
-        <div style="font-size:12.5px;color:var(--muted);">Ask about your spending, budget, or savings this cycle</div>
-      </div>
-      <div style="font-size:20px;">🤖</div>
-    </div>
-
     <div class="section"><h2>Extra income this cycle</h2><span class="tag" id="extraTag">₦0 added</span></div>
     <div class="extra-list" id="extraList"></div>
     <button class="add-extra-btn" id="addExtraBtn">+ Add extra income (bonus, side hustle, gift…)</button>
@@ -411,58 +469,67 @@ body{min-height:100vh; padding-bottom:92px;}
   </div>
 
   <!-- ================= SAVINGS ================= -->
-  <div class="view" id="view-savings">
-    <div class="header"><div><div class="eyebrow">Budget Cockpit</div><div class="h1">Savings & Emergency Fund</div></div></div>
-    <p style="font-size:12px;color:var(--muted);margin:0 20px 16px;line-height:1.5;">
-      These aren't counted as spending — they're money you're moving toward a goal. Totals below include everything you've ever contributed, not just this cycle.</p>
-    <div id="savingsList"></div>
-  </div>
+  <div class="view" id="view-finance">
+    <div class="header"><div><div class="eyebrow">Budget Cockpit</div><div class="h1">Finance</div></div></div>
 
-  <!-- ================= DEBT ================= -->
-  <div class="view" id="view-debt">
-    <div class="header"><div><div class="eyebrow">Budget Cockpit</div><div class="h1">Debt Tracker</div></div></div>
-
-    <div class="hist-summary" id="debtSummary" style="margin-bottom:14px;"></div>
-
-    <div class="section" style="margin-top:0;"><h2>Payoff strategy</h2></div>
-    <div style="margin:0 20px 14px;">
-      <div class="theme-row" style="margin-bottom:8px;">
-        <div class="theme-opt" id="stratAvalanche">Avalanche</div>
-        <div class="theme-opt" id="stratSnowball">Snowball</div>
-        <div class="theme-opt" id="stratManual">Manual</div>
+    <div style="margin:0 20px 16px;">
+      <div class="theme-row" style="margin-bottom:0;">
+        <div class="theme-opt" id="financeTabDebt">💳 Debt</div>
+        <div class="theme-opt" id="financeTabSavings">✚ Savings</div>
       </div>
-      <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0;">
-        <b>Avalanche:</b> pay the highest interest-rate debt first — saves the most money overall.
-        <b>Snowball:</b> pay the smallest balance first — quick wins that build momentum.
-        <b>Manual:</b> you choose which debt to focus on.</p>
     </div>
 
-    <div id="debtFocusCard"></div>
+    <!-- ---- Debt panel ---- -->
+    <div id="financePanelDebt">
+      <div class="hist-summary" id="debtSummary" style="margin-bottom:14px;"></div>
 
-    <div class="section"><h2>All debts</h2><span class="tag" id="debtTag">0 tracked</span></div>
-    <div id="debtList"></div>
+      <div class="section" style="margin-top:0;"><h2>Payoff strategy</h2></div>
+      <div style="margin:0 20px 14px;">
+        <div class="theme-row" style="margin-bottom:8px;">
+          <div class="theme-opt" id="stratAvalanche">Avalanche</div>
+          <div class="theme-opt" id="stratSnowball">Snowball</div>
+          <div class="theme-opt" id="stratManual">Manual</div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0;">
+          <b>Avalanche:</b> pay the highest interest-rate debt first — saves the most money overall.
+          <b>Snowball:</b> pay the smallest balance first — quick wins that build momentum.
+          <b>Manual:</b> you choose which debt to focus on.</p>
+      </div>
 
-    <div style="margin:0 20px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;">
-      <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Add a debt</div>
-      <div class="field">
-        <label>Owed to (creditor)</label>
-        <input type="text" id="newDebtCreditor" placeholder="e.g. Mum, Access Bank, FairMoney">
-      </div>
-      <div class="field">
-        <label>Reason</label>
-        <input type="text" id="newDebtReason" placeholder="e.g. School fees loan, car repair">
-      </div>
-      <div class="settings-row">
+      <div id="debtFocusCard"></div>
+
+      <div class="section"><h2>All debts</h2><span class="tag" id="debtTag">0 tracked</span></div>
+      <div id="debtList"></div>
+
+      <div style="margin:0 20px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Add a debt</div>
         <div class="field">
-          <label>Amount owed ₦</label>
-          <input type="number" id="newDebtAmount" min="0" step="1" placeholder="0">
+          <label>Owed to (creditor)</label>
+          <input type="text" id="newDebtCreditor" placeholder="e.g. Mum, Access Bank, FairMoney">
         </div>
         <div class="field">
-          <label>Interest %/yr (optional)</label>
-          <input type="number" id="newDebtInterest" min="0" step="0.1" placeholder="0">
+          <label>Reason</label>
+          <input type="text" id="newDebtReason" placeholder="e.g. School fees loan, car repair">
         </div>
+        <div class="settings-row">
+          <div class="field">
+            <label>Amount owed ₦</label>
+            <input type="number" id="newDebtAmount" min="0" step="1" placeholder="0">
+          </div>
+          <div class="field">
+            <label>Interest %/yr (optional)</label>
+            <input type="number" id="newDebtInterest" min="0" step="0.1" placeholder="0">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="addDebtBtn">Add debt</button>
       </div>
-      <button class="btn btn-primary" id="addDebtBtn">Add debt</button>
+    </div>
+
+    <!-- ---- Savings panel ---- -->
+    <div id="financePanelSavings" style="display:none;">
+      <p style="font-size:12px;color:var(--muted);margin:0 20px 16px;line-height:1.5;">
+        These aren't counted as spending — they're money you're moving toward a goal. Totals below include everything you've ever contributed, not just this cycle.</p>
+      <div id="savingsList"></div>
     </div>
   </div>
 
@@ -505,6 +572,36 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="faq-a">Totals are saved to History, savings contributions fold into your lifetime accumulated total, a report is generated, and transactions/extra income reset. Category budgets and goals stay the same.</div></div>
       <div class="faq-item"><div class="faq-q">Can I share this app with someone else?</div>
         <div class="faq-a">If you send them your HTML file as-is, they'd be reading and writing to your same Google Sheet — their data would mix into yours, not stay separate, and you would not get a distinct report for them. For someone else to use this properly, they need their own copy: their own Google Sheet, their own Apps Script deployment, and their own token pasted into their own copy of this file.</div></div>
+      <div class="faq-item"><div class="faq-q">How do I edit or delete an expense I logged wrong?</div>
+        <div class="faq-a">Tap any transaction row to edit it — the amount, category, method, description, and date can all be changed, and Save updates it in place instead of creating a duplicate. On mobile you can also swipe a row left to reveal quick Edit and Delete buttons. The ✕ button next to a transaction deletes it directly.</div></div>
+      <div class="faq-item"><div class="faq-q">What are payment methods for, and do I have to use them?</div>
+        <div class="faq-a">Optional. Tagging an expense as Cash, Card, USSD, Mobile Wallet, or Bank Transfer doesn't change any calculations — it's just there so your transaction list (and any export) shows how money left your account, useful for spotting patterns like "I overspend when paying by card."</div></div>
+      <div class="faq-item"><div class="faq-q">How do I add or remove a category?</div>
+        <div class="faq-a">In Settings, scroll to "Add a new category" — give it a name and a group (Needs/Wants/Savings). To remove one, tap the 🗑 next to it in the category list. If it still has spending logged this cycle, you'll be warned first; the transactions themselves aren't deleted, they just show as "Uncategorized."</div></div>
+      <div class="faq-item"><div class="faq-q">What's the difference between the Debt tracker and the "Debt repayment" category?</div>
+        <div class="faq-a">The Debt repayment category is a budget line, like Rent or Food — it caps how much you plan to spend on debt this cycle. The Debt tracker (in the Finance tab) is more granular: it tracks individual creditors, how much you owe each one, and lets you log payments per-creditor. Every debt payment you log there also counts toward the Debt repayment category automatically, so the two stay in sync.</div></div>
+      <div class="faq-item"><div class="faq-q">How does the Avalanche/Snowball/Manual strategy work?</div>
+        <div class="faq-a">Avalanche automatically highlights whichever debt has the highest interest rate as your focus — mathematically saves you the most money. Snowball highlights whichever has the smallest remaining balance — clears faster and builds momentum. Manual lets you pick any debt yourself regardless of the numbers. Switching strategies doesn't change your debts, only which one is suggested as your current focus.</div></div>
+      <div class="faq-item"><div class="faq-q">What happens to a savings goal once I hit it?</div>
+        <div class="faq-a">Nothing automatic — the progress bar just shows 100%+ and the category is marked "Target met." You decide whether to raise the goal, redirect contributions elsewhere, or leave it as a maintained buffer.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I see a report for a cycle I already archived?</div>
+        <div class="faq-a">Yes — go to History, scroll to "Past cycles," and tap "View" on any archived cycle. It rebuilds the full report (charts included) from the transaction snapshot saved at archive time. If a cycle was archived before this feature existed, you'll see totals only, with a note explaining why.</div></div>
+      <div class="faq-item"><div class="faq-q">What's the Year-end review?</div>
+        <div class="faq-a">Also in History — pick a year and it aggregates every cycle archived in that year into one report: total income/spent/saved, a category breakdown across the whole year, and a chart of spend per cycle.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I download or email my report?</div>
+        <div class="faq-a">Both. "Copy text" copies a plain-text version. "Download PDF" generates a formatted document with charts. "Email it" opens your email app with the report pre-filled, addressed to whatever email you've set in Settings — you still have to hit send yourself, since a web page can't send email on its own.</div></div>
+      <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used to train anything?</div>
+        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself via Code.gs, and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect.</div></div>
+      <div class="faq-item"><div class="faq-q">Where does my AI conversation history go?</div>
+        <div class="faq-a">It's saved in your own backend along with everything else, so it persists between visits. Use the 🗑 icon in the AI assistant header to clear it.</div></div>
+      <div class="faq-item"><div class="faq-q">What's the "My own notes" box for?</div>
+        <div class="faq-a">A free-text scratchpad in the Guide tab for anything the structured features don't cover — personal rules, reminders, half-formed ideas. It autosaves a second after you stop typing.</div></div>
+      <div class="faq-item"><div class="faq-q">Does this app work offline?</div>
+        <div class="faq-a">The app shell (layout, styling) loads instantly and works offline once installed via "Add to Home Screen." Your actual data — income, transactions, reports — still needs a live connection to reach your backend, so logging expenses while fully offline won't save until you're back online.</div></div>
+      <div class="faq-item"><div class="faq-q">Light or dark mode — does it matter which I use?</div>
+        <div class="faq-a">Purely a preference, toggled from the header icon or Settings. Nothing about calculations, storage, or backend behavior changes between them.</div></div>
+      <div class="faq-item"><div class="faq-q">I got a "could not save" or "unable to reach backend" message — what do I do?</div>
+        <div class="faq-a">First check you have a working internet connection. If it persists, confirm your Apps Script Web App is still deployed with "Anyone" access and that API_URL in the app matches your deployment's exec URL exactly. If you recently redeployed Apps Script, make sure you used "New version" under Manage deployments rather than creating a fresh deployment, which would change the URL.</div></div>
     </div>
 
     <div class="guide-block">
@@ -539,6 +636,16 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="note-item"><div class="note-num">03</div><div class="note-text"><b>Log expenses the same day.</b> The categories and pace alerts only stay useful if the data is current.</div></div>
       <div class="note-item"><div class="note-num">04</div><div class="note-text"><b>If your total budgeted exceeds your income, something has to give.</b> Check the "Total budgeted" line on Dashboard and Settings — it turns red the moment your categories add up to more than you earn.</div></div>
       <div class="note-item"><div class="note-num">05</div><div class="note-text"><b>Review every payday.</b> Archive the cycle, read the generated report, and adjust next cycle's budgets based on what actually happened.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>My own notes</h3>
+      <p style="font-size:11px;color:var(--muted);margin:-2px 0 10px;line-height:1.5;">
+        A private scratchpad — jot down your own budgeting rules, reminders, or things to try next cycle. Saved automatically.</p>
+      <div class="field" style="margin-bottom:8px;">
+        <textarea id="personalNotesInput" rows="8" placeholder="e.g. Cut back on weekend transport spend. Move ₦5,000 extra to Emergency Fund once debt is cleared. Try meal-prepping Sundays to reduce food spend..."></textarea>
+      </div>
+      <div id="notesSavedLabel" style="font-size:10.5px;color:var(--muted-2);"></div>
     </div>
   </div>
 
@@ -627,12 +734,14 @@ body{min-height:100vh; padding-bottom:92px;}
 </div>
 
 <button class="fab" id="fabAdd">+</button>
+<button class="ai-fab" id="askAiFab" aria-label="AI assistant">
+  <span class="ai-fab-icon">✦</span>
+</button>
 
 <div class="nav">
   <div class="nav-inner">
     <button class="nav-btn active" data-view="dashboard"><span class="ic">◎</span>Dashboard</button>
-    <button class="nav-btn" data-view="debt"><span class="ic">💳</span>Debt</button>
-    <button class="nav-btn" data-view="savings"><span class="ic">✚</span>Savings</button>
+    <button class="nav-btn" data-view="finance"><span class="ic">💰</span>Finance</button>
     <button class="nav-btn" data-view="history"><span class="ic">▤</span>History</button>
     <button class="nav-btn" data-view="guide"><span class="ic">?</span>Guide</button>
     <button class="nav-btn" data-view="settings"><span class="ic">⚙</span>Settings</button>
@@ -749,19 +858,22 @@ body{min-height:100vh; padding-bottom:92px;}
 
 
 <!-- AI assistant sheet -->
-<div class="sheet" id="aiSheet">
+<div class="sheet ai-sheet" id="aiSheet">
   <div class="sheet-handle"></div>
-  <h3>AI assistant</h3>
-  <p style="font-size:11.5px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
-    Answers are based on this cycle's numbers. This isn't financial advice — just a quick sounding board.</p>
-  <div class="field">
-    <textarea id="aiAnswer" rows="7" readonly placeholder="Ask something below — e.g. \"Am I overspending on transport?\" or \"How much more can I save this cycle?\""></textarea>
+  <div class="ai-sheet-header">
+    <div class="ai-avatar">✦</div>
+    <div>
+      <h3 style="margin:0;">AI assistant</h3>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">Based on this cycle's numbers — not financial advice</p>
+    </div>
+    <button class="ai-clear-btn" id="aiClearBtn" title="Clear conversation">🗑</button>
   </div>
-  <div class="field">
-    <input type="text" id="aiQuestion" placeholder="Type your question...">
+  <div class="ai-chat" id="aiChat"></div>
+  <div class="ai-input-row">
+    <input type="text" id="aiQuestion" placeholder="Ask about your spending, budget, or savings…">
+    <button class="ai-send-btn" id="aiAskBtn">➤</button>
   </div>
-  <button class="btn btn-teal" id="aiAskBtn">Ask</button>
-  <button class="btn btn-ghost" id="aiCloseBtn">Close</button>
+  <button class="btn btn-ghost" id="aiCloseBtn" style="margin-top:10px;">Close</button>
 </div>
 
 <!-- Custom confirm modal -->
@@ -881,14 +993,16 @@ let state = {
   history: [],
   debts: [],              // {id, creditor, reason, amount, interestRate}
   debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
-  debtFocusId: ''          // used when debtStrategy === 'manual'
+  debtFocusId: '',         // used when debtStrategy === 'manual'
+  aiHistory: [],           // {id, role:'user'|'bot', text, error?}
+  personalNotes: ''        // free-text budgeting notes/strategy from the Guide tab
 };
 
 /* ============================================================
    BACKEND CONFIG
    ============================================================ */
 const API_URL = 'https://script.google.com/macros/s/AKfycbwW8NdhL066LtcUCYPrNuPesWF-87y-poiJ-T-04X5b6kGKzqnZt92qTtofabayooIN/exec';
-const API_TOKEN = 'Rejoice123'; // must match API_TOKEN in Code.gs exactly, or leave both blank
+const API_TOKEN = ''; // must match API_TOKEN in Code.gs exactly, or leave both blank
 const STORAGE_KEY = 'budget-cockpit-state';
 
 async function loadState(){
@@ -911,10 +1025,13 @@ async function loadState(){
   if(!state.debts) state.debts = [];
   if(!state.debtStrategy) state.debtStrategy = 'avalanche';
   if(state.debtFocusId == null) state.debtFocusId = '';
+  if(!state.aiHistory) state.aiHistory = [];
+  if(state.personalNotes == null) state.personalNotes = '';
   state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; });
   refreshCycleDates();
 
   applyTheme(state.theme);
+  document.getElementById('personalNotesInput').value = state.personalNotes || '';
   renderAll();
   loadQuote();
   startClock();
@@ -1285,26 +1402,39 @@ function renderTxRow(container, t, showDelete){
   const cat = catById(t.categoryId);
   const savingsTag = cat && cat.group==='Savings' ? '<span class="tx-tag-savings">SAVINGS</span>' : '';
   const methodTag = t.method ? ' · ' + escapeHtml(t.method) : '';
-  const row = document.createElement('div');
-  row.className = 'tx-row';
-  row.style.cursor = 'pointer';
-  row.innerHTML = `
-    <div class="tx-left">
-      <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}</div>
-      <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
+
+  const wrap = document.createElement('div');
+  wrap.className = 'tx-swipe-wrap';
+  wrap.innerHTML = `
+    <div class="tx-swipe-actions">
+      <button class="tx-swipe-btn tx-swipe-edit" aria-label="Edit">✏️</button>
+      ${showDelete ? `<button class="tx-swipe-btn tx-swipe-del" aria-label="Delete">🗑</button>` : ''}
     </div>
-    <div style="display:flex;align-items:center;">
-      <div class="tx-right">
-        <div class="tx-amt">${fmt(t.amount)}</div>
-        <div class="tx-date">${t.date}</div>
+    <div class="tx-row" style="cursor:pointer;">
+      <div class="tx-left">
+        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}</div>
+        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
       </div>
-      ${showDelete ? `<button class="tx-del" data-id="${t.id}">✕</button>` : ''}
+      <div style="display:flex;align-items:center;">
+        <div class="tx-right">
+          <div class="tx-amt">${fmt(t.amount)}</div>
+          <div class="tx-date">${t.date}</div>
+        </div>
+        ${showDelete ? `<button class="tx-del" data-id="${t.id}">✕</button>` : ''}
+      </div>
     </div>
   `;
-  container.appendChild(row);
+  container.appendChild(wrap);
+  const row = wrap.querySelector('.tx-row');
+
+  // Tap / click to edit (desktop and a non-drag tap on mobile)
   row.addEventListener('click', (e)=>{
     if(e.target.closest('.tx-del')) return;
+    if(row.dataset.dragged==='1'){ row.dataset.dragged='0'; return; }
     openEditTx(t);
+  });
+  wrap.querySelector('.tx-swipe-edit').addEventListener('click', (e)=>{
+    e.stopPropagation(); resetSwipe(row); openEditTx(t);
   });
   if(showDelete){
     row.querySelector('.tx-del').addEventListener('click', (e)=>{
@@ -1313,7 +1443,47 @@ function renderTxRow(container, t, showDelete){
       saveState(); renderAll();
       showToast('Expense removed');
     });
+    const delBtn = wrap.querySelector('.tx-swipe-del');
+    if(delBtn) delBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      state.transactions = state.transactions.filter(x=>x.id!==t.id);
+      saveState(); renderAll();
+      showToast('Expense removed');
+    });
   }
+  attachSwipe(row);
+}
+
+/* Swipe-to-reveal: drag a transaction row left to expose Edit/Delete buttons underneath. */
+const SWIPE_REVEAL = 76;
+let openSwipeRow = null;
+function resetSwipe(row){ row.style.transition='transform .2s ease'; row.style.transform='translateX(0)'; if(openSwipeRow===row) openSwipeRow=null; }
+function attachSwipe(row){
+  let startX=0, dx=0, dragging=false;
+  row.addEventListener('touchstart', e=>{
+    if(openSwipeRow && openSwipeRow!==row) resetSwipe(openSwipeRow);
+    startX = e.touches[0].clientX; dragging = true; dx = 0;
+    row.dataset.dragged = '0';
+    row.style.transition = 'none';
+  }, {passive:true});
+  row.addEventListener('touchmove', e=>{
+    if(!dragging) return;
+    dx = e.touches[0].clientX - startX;
+    if(Math.abs(dx) > 6) row.dataset.dragged = '1';
+    const x = Math.min(0, Math.max(-SWIPE_REVEAL, dx));
+    row.style.transform = 'translateX(' + x + 'px)';
+  }, {passive:true});
+  row.addEventListener('touchend', ()=>{
+    dragging = false;
+    row.style.transition = 'transform .2s ease';
+    if(dx < -SWIPE_REVEAL*0.5){
+      row.style.transform = 'translateX(-' + SWIPE_REVEAL + 'px)';
+      openSwipeRow = row;
+    } else {
+      row.style.transform = 'translateX(0)';
+      if(openSwipeRow===row) openSwipeRow = null;
+    }
+  });
 }
 
 /* ============================================================
@@ -1431,6 +1601,20 @@ function renderDebtTab(){
     }));
   }
 }
+
+document.getElementById('financeTabDebt').addEventListener('click', ()=>{
+  document.getElementById('financeTabDebt').classList.add('active');
+  document.getElementById('financeTabSavings').classList.remove('active');
+  document.getElementById('financePanelDebt').style.display = '';
+  document.getElementById('financePanelSavings').style.display = 'none';
+});
+document.getElementById('financeTabSavings').addEventListener('click', ()=>{
+  document.getElementById('financeTabSavings').classList.add('active');
+  document.getElementById('financeTabDebt').classList.remove('active');
+  document.getElementById('financePanelSavings').style.display = '';
+  document.getElementById('financePanelDebt').style.display = 'none';
+});
+document.getElementById('financeTabDebt').classList.add('active');
 
 document.getElementById('stratAvalanche').addEventListener('click', ()=>{ state.debtStrategy='avalanche'; saveState(); renderAll(); });
 document.getElementById('stratSnowball').addEventListener('click', ()=>{ state.debtStrategy='snowball'; saveState(); renderAll(); });
@@ -1743,22 +1927,51 @@ document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
 });
 
 /* ============================================================
-   AI ASSISTANT
+   AI ASSISTANT (floating widget, chat-style, persisted history)
    ============================================================ */
 const aiSheet = document.getElementById('aiSheet');
-document.getElementById('askAiCard').addEventListener('click', ()=>{
+function renderAiChat(){
+  const wrap = document.getElementById('aiChat');
+  if(!state.aiHistory.length){
+    wrap.innerHTML = '<div class="ai-empty">Ask me anything about this cycle — e.g. "Am I overspending on transport?" or "How much more can I save?"</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  state.aiHistory.forEach(msg=>{
+    const bubble = document.createElement('div');
+    bubble.className = 'ai-bubble ' + msg.role + (msg.error ? ' error' : '');
+    bubble.textContent = msg.text;
+    wrap.appendChild(bubble);
+  });
+  wrap.scrollTop = wrap.scrollHeight;
+}
+document.getElementById('askAiFab').addEventListener('click', ()=>{
   if(!API_URL){
     showToast('Connect a backend first (see Settings) — the AI assistant needs one');
     return;
   }
+  renderAiChat();
   activeSheet = aiSheet; openSheetEl(aiSheet);
+  setTimeout(()=>document.getElementById('aiQuestion').focus(), 300);
 });
 document.getElementById('aiCloseBtn').addEventListener('click', ()=>{ closeSheetEl(aiSheet); activeSheet=null; });
-document.getElementById('aiAskBtn').addEventListener('click', async ()=>{
-  const q = document.getElementById('aiQuestion').value.trim();
-  const answerBox = document.getElementById('aiAnswer');
-  if(!q){ showToast('Type a question first'); return; }
-  answerBox.value = 'Thinking…';
+document.getElementById('aiClearBtn').addEventListener('click', async ()=>{
+  if(!state.aiHistory.length) return;
+  const ok = await askConfirm('Clear conversation?', 'This deletes your AI chat history. This can\'t be undone.');
+  if(!ok) return;
+  state.aiHistory = [];
+  saveState(); renderAiChat();
+});
+async function sendAiQuestion(){
+  const input = document.getElementById('aiQuestion');
+  const q = input.value.trim();
+  if(!q) return;
+  state.aiHistory.push({id: Date.now(), role:'user', text:q});
+  input.value = '';
+  renderAiChat();
+  const thinkingId = Date.now()+1;
+  state.aiHistory.push({id: thinkingId, role:'bot', text:'Thinking…'});
+  renderAiChat();
   try{
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -1766,10 +1979,35 @@ document.getElementById('aiAskBtn').addEventListener('click', async ()=>{
       body: JSON.stringify({action:'askAI', question: q, token: API_TOKEN})
     });
     const data = await res.json();
-    answerBox.value = data.answer || data.error || 'No response — try again.';
+    const msg = state.aiHistory.find(m=>m.id===thinkingId);
+    if(msg){
+      msg.text = data.answer || data.error || 'No response — try again.';
+      msg.error = !data.answer;
+    }
   }catch(e){
-    answerBox.value = 'Could not reach the AI assistant — check your connection.';
+    const msg = state.aiHistory.find(m=>m.id===thinkingId);
+    if(msg){ msg.text = 'Could not reach the AI assistant — check your connection.'; msg.error = true; }
   }
+  saveState(); renderAiChat();
+}
+document.getElementById('aiAskBtn').addEventListener('click', sendAiQuestion);
+document.getElementById('aiQuestion').addEventListener('keydown', (e)=>{
+  if(e.key==='Enter'){ e.preventDefault(); sendAiQuestion(); }
+});
+
+/* ============================================================
+   PERSONAL NOTES (Guide tab) — auto-saves as you type
+   ============================================================ */
+let notesSaveTimer = null;
+document.getElementById('personalNotesInput').addEventListener('input', (e)=>{
+  state.personalNotes = e.target.value;
+  clearTimeout(notesSaveTimer);
+  const label = document.getElementById('notesSavedLabel');
+  label.textContent = 'Saving…';
+  notesSaveTimer = setTimeout(()=>{
+    saveState();
+    label.textContent = 'Saved ' + new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  }, 700);
 });
 
 /* ============================================================
@@ -2028,8 +2266,23 @@ document.getElementById('emailReportBtn').addEventListener('click', ()=>{
   const body = encodeURIComponent(document.getElementById('reportText').value);
   window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
 });
-document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
+let jsPdfLoading = null;
+function loadJsPdf(){
+  if(window.jspdf) return Promise.resolve();
+  if(jsPdfLoading) return jsPdfLoading;
+  jsPdfLoading = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return jsPdfLoading;
+}
+document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
   try{
+    showToast('Preparing PDF…');
+    await loadJsPdf();
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     const d = currentReportD;
