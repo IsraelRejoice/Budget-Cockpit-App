@@ -9,6 +9,25 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' https://cdnjs.cloudflare.com;
+  style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data:;
+  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io;
+  object-src 'none';
+  base-uri 'self';
+  frame-ancestors 'self';
+">
+<!-- CSP note: script-src no longer needs 'unsafe-inline' now that all JS
+     lives in app.js (an external file) rather than inline — this is a real
+     security improvement: an injected inline script block (from an XSS bug, a
+     compromised dependency, etc.) would now be BLOCKED from executing,
+     not just discouraged. style-src still allows 'unsafe-inline' because
+     this file uses inline style="" attributes extensively; moving those to
+     CSS classes would let that be tightened too, at the cost of a much
+     larger refactor. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@1,600;1,700&display=swap" rel="stylesheet">
 <!-- jsPDF is lazy-loaded on demand (see loadJsPdf()) instead of blocking initial page load -->
@@ -118,6 +137,35 @@ body{min-height:100vh; padding-bottom:92px;}
   color:var(--text);position:relative;z-index:1;}
 .quote-author{font-size:11px;color:var(--gold);margin-top:10px;text-align:right;position:relative;z-index:1;
   font-weight:600;letter-spacing:.03em;}
+
+/* Badges */
+.badge-row{margin:12px 20px 0;display:flex;flex-wrap:wrap;gap:8px;}
+.badge-pill{background:linear-gradient(135deg,rgba(232,177,76,.18),rgba(63,199,176,.12));
+  border:1px solid var(--gold);color:var(--text);font-size:11px;font-weight:600;padding:6px 12px;border-radius:20px;}
+
+/* Bill reminders */
+.bill-reminders{margin:12px 20px 0;display:flex;flex-direction:column;gap:6px;}
+.bill-pill{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);border-radius:12px;
+  padding:9px 13px;font-size:11.5px;color:var(--text);display:flex;gap:8px;align-items:center;}
+.bill-pill span{color:var(--red);font-weight:700;font-size:10.5px;flex:none;}
+
+/* Mini card (weekday chart) */
+.mini-card{margin:14px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;}
+.mini-card-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;}
+.mini-card canvas{width:100%;height:auto;display:block;}
+.mini-card-note{font-size:11px;color:var(--gold);margin-top:6px;font-weight:600;}
+
+/* What-if simulator entry */
+.whatif-btn{margin:14px 20px 0;width:calc(100% - 40px);padding:13px;border-radius:14px;border:1px dashed var(--gold);
+  background:rgba(232,177,76,.06);color:var(--gold);font-size:13px;font-weight:600;cursor:pointer;}
+.whatif-result{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+.whatif-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);padding:5px 0;}
+.whatif-row b{color:var(--text);font-family:'JetBrains Mono',monospace;}
+.whatif-row.highlight b{color:var(--teal);font-size:15px;}
+.share-result{background:var(--panel-2);border:1px solid var(--gold);border-radius:12px;padding:12px;margin-top:10px;}
+.share-result input{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 10px;margin-bottom:8px;}
+.share-result-note{font-size:10.5px;color:var(--muted);line-height:1.4;}
 
 /* Section headers */
 .section{margin:26px 20px 10px;display:flex;align-items:center;justify-content:space-between;}
@@ -301,6 +349,11 @@ body{min-height:100vh; padding-bottom:92px;}
 .sheet.show{transform:translateY(0);}
 .sheet-handle{width:36px;height:4px;background:var(--line);border-radius:3px;margin:0 auto 14px;}
 .sheet h3{font-family:'Space Grotesk',sans-serif;margin:0 0 16px;font-size:17px;}
+.voice-btn{background:var(--panel-2);border:1px solid var(--line);border-radius:50%;width:38px;height:38px;
+  font-size:16px;cursor:pointer;flex:none;}
+.voice-btn.listening{background:linear-gradient(135deg,var(--red),#c94848);animation:aiPulse 1.2s ease-in-out infinite;}
+.voice-status{font-size:11.5px;color:var(--gold);margin:10px 0 -4px;padding:8px 12px;background:rgba(232,177,76,.08);
+  border-radius:10px;line-height:1.4;}
 .field{margin-bottom:14px;}
 .field label{display:block;font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;}
 .field .current{font-size:11px;color:var(--gold);margin-bottom:6px;font-family:'JetBrains Mono',monospace;}
@@ -352,6 +405,17 @@ body{min-height:100vh; padding-bottom:92px;}
 
 .report-charts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
 .report-charts canvas{background:var(--panel-2);border-radius:10px;border:1px solid var(--line);max-width:100%;}
+
+/* Lock screen */
+.lock-screen{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px;}
+.lock-box{width:100%;max-width:340px;text-align:center;}
+.lock-icon{font-size:40px;margin-bottom:10px;}
+.lock-title{font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px;}
+.lock-sub{font-size:12.5px;color:var(--muted);margin:0 0 20px;}
+.lock-input{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
+  color:var(--text);font-family:'Inter',sans-serif;font-size:16px;padding:14px 16px;text-align:center;}
+.lock-input:focus{outline:none;border-color:var(--gold);}
+.lock-error{margin-top:12px;font-size:12px;color:var(--red);min-height:16px;}
 /* Hover states — desktop/web only, never affects touch devices */
 @media (hover:hover) and (pointer:fine){
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
@@ -376,6 +440,18 @@ body{min-height:100vh; padding-bottom:92px;}
 </head>
 <body>
 
+<div class="lock-screen" id="lockScreen" style="display:none;">
+  <div class="lock-box">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title">Budget Cockpit</div>
+    <p class="lock-sub">Enter your password to continue</p>
+    <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
+    <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Unlock</button>
+    <div class="lock-error" id="lockError"></div>
+  </div>
+</div>
+
+
 <div class="app">
 
   <!-- ================= DASHBOARD ================= -->
@@ -385,6 +461,7 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="eyebrow">Budget Cockpit</div>
         <div class="h1" id="cycleLabel">Current pay cycle</div>
         <div class="clock" id="liveClock">—</div>
+        <div class="clock" id="syncIndicator" style="margin-top:2px;">● Synced</div>
       </div>
       <button class="theme-toggle" id="themeToggleBtn" aria-label="Toggle light/dark mode">🌙</button>
     </div>
@@ -426,6 +503,9 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="payday-countdown" id="paydayCountdown">—</div>
     </div>
 
+    <div class="badge-row" id="badgeRow" style="display:none;"></div>
+    <div class="bill-reminders" id="billReminders" style="display:none;"></div>
+
     <div class="budget-check" id="budgetCheck">
       <span class="lbl">Total budgeted (all categories)</span>
       <span class="val" id="budgetCheckVal">—</span>
@@ -456,6 +536,14 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="quote-text" id="quoteText">Loading…</div>
       <div class="quote-author" id="quoteAuthor"></div>
     </div>
+
+    <div class="mini-card">
+      <div class="mini-card-title">Weekday pattern</div>
+      <canvas id="weekdayCanvas" width="280" height="90"></canvas>
+      <div class="mini-card-note" id="weekdayHighest">—</div>
+    </div>
+
+    <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
 
     <div class="section"><h2>Extra income this cycle</h2><span class="tag" id="extraTag">₦0 added</span></div>
     <div class="extra-list" id="extraList"></div>
@@ -664,8 +752,12 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="section"><h2>Income & pay cycle</h2></div>
     <div style="margin:0 20px;">
       <div class="field">
+        <label>Currency</label>
+        <select id="currencySelect"></select>
+      </div>
+      <div class="field">
         <div class="current" id="incomeCurrentDisplay">Current: ₦0</div>
-        <label>Update base income (₦)</label>
+        <label>Update base income</label>
         <input type="number" id="incomeInput" class="amt-input" inputmode="decimal" min="0" step="1" placeholder="Enter new amount">
       </div>
       <div class="field">
@@ -721,6 +813,28 @@ body{min-height:100vh; padding-bottom:92px;}
       <button class="btn btn-teal" id="reportBtn">Generate report now</button>
     </div>
 
+    <div class="section"><h2>Bills & subscriptions</h2><span class="tag" id="billsTag"></span></div>
+    <p style="font-size:11px;color:var(--muted);margin:-4px 20px 10px;line-height:1.5;">Get a reminder banner on Dashboard when a bill is due within 5 days.</p>
+    <div id="billsList" style="margin:0 20px;"></div>
+    <div style="margin:0 20px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Add a bill</div>
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="newBillName" placeholder="e.g. Netflix, Rent, School fees">
+      </div>
+      <div class="settings-row">
+        <div class="field">
+          <label>Amount</label>
+          <input type="number" id="newBillAmount" min="0" step="1" placeholder="0">
+        </div>
+        <div class="field">
+          <label>Due day of month</label>
+          <input type="number" id="newBillDueDay" min="1" max="28" step="1" placeholder="1">
+        </div>
+      </div>
+      <button class="btn btn-primary" id="addBillBtn">Add bill</button>
+    </div>
+
     <div class="section"><h2>Pay-cycle rollover</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;">
@@ -728,6 +842,19 @@ body{min-height:100vh; padding-bottom:92px;}
         and clears transactions + extra income. Category budgets and goals stay the same.
       </p>
       <button class="btn btn-danger" id="archiveBtn">Archive this cycle & start fresh</button>
+    </div>
+
+    <div class="section"><h2>Shared links</h2><span class="tag" id="sharesTag"></span></div>
+    <p style="font-size:11px;color:var(--muted);margin:-4px 20px 10px;line-height:1.5;">Active read-only report links you've created. Anyone with one of these can view that report snapshot without logging in.</p>
+    <div id="sharesList" style="margin:0 20px 20px;"></div>
+
+    <div class="section"><h2>Security</h2></div>
+    <div style="margin:0 20px 20px;">
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;">
+        If you've set up a password in Code.gs, your login stays active on this device until you close the browser/app,
+        or for the session length configured server-side. Lock immediately before handing your phone to someone else.
+      </p>
+      <button class="btn btn-ghost" id="lockNowBtn">Lock app now</button>
     </div>
   </div>
 
@@ -752,7 +879,11 @@ body{min-height:100vh; padding-bottom:92px;}
 <div class="overlay" id="overlay"></div>
 <div class="sheet" id="addSheet">
   <div class="sheet-handle"></div>
-  <h3 id="addSheetTitle">Log an expense</h3>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h3 id="addSheetTitle" style="margin:0;">Log an expense</h3>
+    <button class="voice-btn" id="voiceLogBtn" title="Speak your expense">🎙️</button>
+  </div>
+  <div class="voice-status" id="voiceStatus" style="display:none;"></div>
   <div class="field">
     <label>Amount (₦)</label>
     <input type="number" id="txAmount" class="amt-input" inputmode="decimal" placeholder="0" min="0" step="1">
@@ -804,6 +935,24 @@ body{min-height:100vh; padding-bottom:92px;}
   <button class="btn btn-ghost" id="extraCancelBtn">Cancel</button>
 </div>
 
+<!-- What-if simulator sheet -->
+<div class="sheet" id="whatIfSheet">
+  <div class="sheet-handle"></div>
+  <h3>🔮 What if…</h3>
+  <p style="font-size:11.5px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
+    See the impact of cutting a category's spending — nothing here changes your real budget, it's just a preview.</p>
+  <div class="field">
+    <label>Category</label>
+    <select id="whatIfCategory"></select>
+  </div>
+  <div class="field">
+    <label>Cut by <span id="whatIfPctLabel">20%</span></label>
+    <input type="range" id="whatIfSlider" min="0" max="100" value="20" step="5" style="width:100%;">
+  </div>
+  <div class="whatif-result" id="whatIfResult"></div>
+  <button class="btn btn-ghost" id="whatIfCloseBtn">Close</button>
+</div>
+
 <!-- Debt payment sheet -->
 <div class="sheet" id="debtPaySheet">
   <div class="sheet-handle"></div>
@@ -853,6 +1002,8 @@ body{min-height:100vh; padding-bottom:92px;}
     <button class="btn btn-teal" id="downloadPdfBtn">Download PDF</button>
   </div>
   <button class="btn btn-ghost" id="emailReportBtn">Email it</button>
+  <button class="btn btn-ghost" id="shareReportBtn">🔗 Create shareable link (7 days)</button>
+  <div id="shareResult" style="display:none;"></div>
   <button class="btn btn-ghost" id="reportCloseBtn">Close</button>
 </div>
 
@@ -888,1604 +1039,6 @@ body{min-height:100vh; padding-bottom:92px;}
 
 <div class="toast" id="toast"></div>
 
-<script>
-/* ============================================================
-   DEFAULT DATA
-   ============================================================ */
-const DEFAULT_CATEGORIES = [
-  {id:'rent', name:'Rent / Housing', group:'Needs', budget:0, threshold:0.90, icon:'🏠'},
-  {id:'util', name:'Utilities', group:'Needs', budget:0, threshold:0.90, icon:'💡'},
-  {id:'transport', name:'Transport / Fuel', group:'Needs', budget:0, threshold:0.85, icon:'🚗'},
-  {id:'food', name:'Feeding / Groceries', group:'Needs', budget:0, threshold:0.85, icon:'🍽️'},
-  {id:'airtime', name:'Airtime & Data', group:'Needs', budget:0, threshold:0.90, icon:'📱'},
-  {id:'health', name:'Health / Medical', group:'Needs', budget:0, threshold:0.90, icon:'🏥'},
-  {id:'family', name:'Family support', group:'Needs', budget:0, threshold:0.90, icon:'👪'},
-  {id:'debt', name:'Debt repayment', group:'Needs', budget:0, threshold:0.95, icon:'💳'},
-  {id:'care', name:'Personal care', group:'Wants', budget:0, threshold:0.85, icon:'🧴'},
-  {id:'clothing', name:'Clothing', group:'Wants', budget:0, threshold:0.85, icon:'👕'},
-  {id:'ent', name:'Entertainment', group:'Wants', budget:0, threshold:0.80, icon:'🎬'},
-  {id:'subs', name:'Subscriptions', group:'Wants', budget:0, threshold:0.80, icon:'📺'},
-  {id:'misc', name:'Misc / Buffer', group:'Wants', budget:0, threshold:0.80, icon:'🧾'},
-  {id:'emergency', name:'Emergency Fund', group:'Savings', budget:0, threshold:null, goal:0, icon:'🚨'},
-  {id:'invest', name:'Savings / Investment', group:'Savings', budget:0, threshold:null, goal:0, icon:'📈'},
-];
-const DEFAULT_ICON_BY_GROUP = { Needs:'📌', Wants:'✨', Savings:'💰' };
-
-const LOCAL_QUOTES = [
-  {text:"A budget is telling your money where to go instead of wondering where it went.", author:"John C. Maxwell"},
-  {text:"Do not save what is left after spending; spend what is left after saving.", author:"Warren Buffett"},
-  {text:"It's not your salary that makes you rich, it's your spending habits.", author:"Charles A. Jaffe"},
-  {text:"The habit of saving is itself an education; it fosters every virtue.", author:"T.T. Munger"},
-  {text:"Beware of little expenses; a small leak will sink a great ship.", author:"Benjamin Franklin"},
-  {text:"You must gain control over your money or the lack of it will forever control you.", author:"Dave Ramsey"},
-  {text:"Never spend your money before you have earned it.", author:"Thomas Jefferson"},
-  {text:"An investment in knowledge pays the best interest.", author:"Benjamin Franklin"},
-  {text:"Rich people have small TVs and big libraries, poor people have big TVs and small libraries.", author:"Zig Ziglar"},
-  {text:"The stock market is a device for transferring money from the impatient to the patient.", author:"Warren Buffett"},
-  {text:"Financial peace isn't the acquisition of stuff, it's learning to live on less than you make.", author:"Dave Ramsey"},
-  {text:"Every time you borrow money, you're robbing your future self.", author:"Nathan W. Morris"},
-  {text:"A part of all you earn is yours to keep.", author:"George S. Clason, The Richest Man in Babylon"},
-  {text:"Money looks better in the bank than on your feet.", author:"Sophia Amoruso"},
-  {text:"Discipline is choosing between what you want now and what you want most.", author:"Abraham Lincoln"},
-  {text:"The rich buy assets. The poor only have expenses.", author:"Robert Kiyosaki, Rich Dad Poor Dad"},
-  {text:"Wealth is what you don't see — spent money is gone, not wealth.", author:"Morgan Housel, The Psychology of Money"},
-  {text:"Good investing isn't about being right — it's about staying wealthy for a long time.", author:"Morgan Housel, The Psychology of Money"},
-  {text:"Whatever your income, always live below your means.", author:"Thomas J. Stanley, The Millionaire Next Door"},
-  {text:"Money is a tool. Used wisely, it can make life more enjoyable.", author:"T. Harv Eker"},
-  {text:"Frugality includes learning to enjoy what you already have.", author:"Vicki Robin, Your Money or Your Life"},
-  {text:"Every dollar you have is a servant working for you.", author:"Idowu Koyenikan"},
-  {text:"Not knowing your numbers is the fastest route to broke.", author:"Ramit Sethi"},
-  {text:"Small amounts saved consistently outperform big amounts saved rarely.", author:"J.L. Collins, The Simple Path to Wealth"},
-  {text:"A goal without a plan is just a wish.", author:"Antoine de Saint-Exupéry"},
-  {text:"Formal education will make you a living; self-education will make you a fortune.", author:"Jim Rohn"},
-  {text:"He who buys what he does not need steals from himself.", author:"Swedish proverb"},
-  {text:"Thinking about tomorrow and ignoring today's small habits is how debt begins.", author:"Suze Orman"},
-  {text:"The habit of saving money teaches every virtue — self-control, discipline, self-denial.", author:"T.T. Munger"},
-  {text:"It is not the man who has too little, but the man who craves more, that is poor.", author:"Seneca"},
-  {text:"Riches begin with a state of mind, with definiteness of purpose.", author:"Napoleon Hill, Think and Grow Rich"},
-  {text:"He that is of the opinion money will do everything may well be suspected of doing everything for money.", author:"Benjamin Franklin"},
-];
-
-function pad(n){ return String(n).padStart(2,'0'); }
-function toDateInput(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
-
-/* ============================================================
-   PAYDAY RULE — fixed day of month, shifted to the preceding
-   Friday if it falls on a Saturday or Sunday.
-   ============================================================ */
-function adjustForWeekend(date){
-  const day = date.getDay(); // 0 = Sunday, 6 = Saturday
-  const d = new Date(date);
-  if(day === 6) d.setDate(d.getDate() - 1);
-  else if(day === 0) d.setDate(d.getDate() - 2);
-  return d;
-}
-function paydayForMonth(year, monthIndex, payDay){
-  const lastDayOfMonth = new Date(year, monthIndex+1, 0).getDate();
-  const day = Math.min(payDay, lastDayOfMonth);
-  return adjustForWeekend(new Date(year, monthIndex, day));
-}
-function mostRecentPayday(payDay, ref){
-  const thisMonth = paydayForMonth(ref.getFullYear(), ref.getMonth(), payDay);
-  if(thisMonth <= ref) return thisMonth;
-  return paydayForMonth(ref.getFullYear(), ref.getMonth()-1, payDay);
-}
-function refreshCycleDates(){
-  const today = new Date(); today.setHours(0,0,0,0);
-  const payDay = state.paydayDay || 25;
-  const last = mostRecentPayday(payDay, today);
-  const next = paydayForMonth(last.getFullYear(), last.getMonth()+1, payDay);
-  state.lastPayDate = toDateInput(last);
-  state.nextPayDate = toDateInput(next);
-}
-
-let state = {
-  theme: 'dark',
-  income: 0,
-  email: '',
-  paydayDay: 25,
-  lastPayDate: '',
-  nextPayDate: '',
-  categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
-  savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
-  extraIncome: [],
-  transactions: [],
-  history: [],
-  debts: [],              // {id, creditor, reason, amount, interestRate}
-  debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
-  debtFocusId: '',         // used when debtStrategy === 'manual'
-  aiHistory: [],           // {id, role:'user'|'bot', text, error?}
-  personalNotes: ''        // free-text budgeting notes/strategy from the Guide tab
-};
-
-/* ============================================================
-   BACKEND CONFIG
-   ============================================================ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwW8NdhL066LtcUCYPrNuPesWF-87y-poiJ-T-04X5b6kGKzqnZt92qTtofabayooIN/exec';
-const API_TOKEN = ''; // must match API_TOKEN in Code.gs exactly, or leave both blank
-const STORAGE_KEY = 'budget-cockpit-state';
-
-async function loadState(){
-  try{
-    if(API_URL){
-      const url = API_URL + '?action=getState' + (API_TOKEN ? '&token='+encodeURIComponent(API_TOKEN) : '');
-      const res = await fetch(url);
-      const data = await res.json();
-      if(data && !data.error) state = Object.assign(state, data);
-      else showToast('Backend error: ' + (data.error||'unknown'));
-    } else {
-      const res = await window.storage.get(STORAGE_KEY, false);
-      if(res && res.value) state = Object.assign(state, JSON.parse(res.value));
-    }
-  }catch(e){
-    showToast('Could not reach backend — showing local data');
-  }
-  if(!state.paydayDay) state.paydayDay = 25;
-  if(!state.savingsAccumulated) state.savingsAccumulated = {};
-  if(!state.debts) state.debts = [];
-  if(!state.debtStrategy) state.debtStrategy = 'avalanche';
-  if(state.debtFocusId == null) state.debtFocusId = '';
-  if(!state.aiHistory) state.aiHistory = [];
-  if(state.personalNotes == null) state.personalNotes = '';
-  state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; });
-  refreshCycleDates();
-
-  applyTheme(state.theme);
-  document.getElementById('personalNotesInput').value = state.personalNotes || '';
-  renderAll();
-  loadQuote();
-  startClock();
-}
-
-let saveTimer = null;
-function saveState(){
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try{
-      if(API_URL){
-        await fetch(API_URL, {
-          method: 'POST',
-          headers: {'Content-Type': 'text/plain;charset=utf-8'},
-          body: JSON.stringify({action:'saveState', state, token: API_TOKEN})
-        });
-      } else {
-        await window.storage.set(STORAGE_KEY, JSON.stringify(state), false);
-      }
-    }catch(e){
-      showToast('Could not save — check your connection');
-    }
-  }, 250);
-}
-
-/* ============================================================
-   HELPERS
-   ============================================================ */
-function fmt(n){
-  n = Math.round(n||0);
-  return '₦' + n.toLocaleString('en-NG');
-}
-function catById(id){ return state.categories.find(c=>c.id===id); }
-function isSavingsCat(id){ const c = catById(id); return !!(c && c.group==='Savings'); }
-
-function spendingCategories(){ return state.categories.filter(c=>c.group!=='Savings'); }
-function savingsCategories(){ return state.categories.filter(c=>c.group==='Savings'); }
-
-function spentFor(catId){ return state.transactions.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
-function spentForIn(txs, catId){ return txs.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
-
-function totalSpent(){
-  return state.transactions.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-}
-function savingsContribThisCycle(){
-  return state.transactions.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-}
-function totalBudget(){ return spendingCategories().reduce((s,c)=>s+Number(c.budget),0); }
-function totalSavingsBudget(){ return savingsCategories().reduce((s,c)=>s+Number(c.budget),0); }
-function extraTotal(){ return state.extraIncome.reduce((s,e)=>s+Number(e.amount),0); }
-function combinedIncome(){ return Number(state.income||0) + extraTotal(); }
-function lifetimeSaved(catId){ return (state.savingsAccumulated[catId]||0) + spentFor(catId); }
-
-function debtById(id){ return state.debts.find(d=>d.id===id); }
-function paidForDebt(debtId){ return state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0); }
-function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
-function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
-function totalDebtPaid(){ return state.debts.reduce((s,d)=>s+paidForDebt(d.id),0); }
-function totalDebtRemaining(){ return Math.max(totalDebtOwed()-totalDebtPaid(),0); }
-function activeDebts(){ return state.debts.filter(d=>remainingForDebt(d)>0); }
-function suggestedFocusDebt(){
-  const active = activeDebts();
-  if(!active.length) return null;
-  if(state.debtStrategy==='avalanche') return active.slice().sort((a,b)=>(Number(b.interestRate)||0)-(Number(a.interestRate)||0))[0];
-  if(state.debtStrategy==='snowball') return active.slice().sort((a,b)=>remainingForDebt(a)-remainingForDebt(b))[0];
-  return debtById(state.debtFocusId) || active[0];
-}
-
-function daysBetween(a,b){ return Math.round((b-a)/86400000); }
-function cyclePace(){
-  const last = new Date(state.lastPayDate+'T00:00:00');
-  const next = new Date(state.nextPayDate+'T00:00:00');
-  const now = new Date(); now.setHours(0,0,0,0);
-  const totalDays = Math.max(daysBetween(last, next), 1);
-  let elapsed = daysBetween(last, now);
-  elapsed = Math.min(Math.max(elapsed, 0), totalDays);
-  const daysLeft = Math.max(totalDays - elapsed, 0);
-  return { totalDays, elapsed, daysLeft, pacePct: elapsed/totalDays };
-}
-function escapeHtml(str){
-  if(str==null) return '';
-  return String(str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-}
-function showToast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2400);
-}
-function celebrate(){
-  const emojis = ['🎉','✨','💰','🏆','⭐'];
-  for(let i=0;i<18;i++){
-    const el = document.createElement('div');
-    el.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-    el.style.cssText = 'position:fixed;top:-30px;left:'+(Math.random()*100)+'vw;font-size:'+(16+Math.random()*14)+'px;'+
-      'z-index:80;pointer-events:none;animation:confettiFall '+(1.8+Math.random()*1.2)+'s ease-in forwards;'+
-      'animation-delay:'+(Math.random()*0.4)+'s;';
-    document.body.appendChild(el);
-    setTimeout(()=>el.remove(), 3500);
-  }
-}
-
-/* ============================================================
-   THEME
-   ============================================================ */
-function applyTheme(theme){
-  document.documentElement.dataset.theme = theme;
-  document.getElementById('themeToggleBtn').textContent = theme==='light' ? '☀️' : '🌙';
-  document.getElementById('themeOptDark').classList.toggle('active', theme==='dark');
-  document.getElementById('themeOptLight').classList.toggle('active', theme==='light');
-}
-document.getElementById('themeToggleBtn').addEventListener('click', ()=>{
-  state.theme = state.theme==='light' ? 'dark' : 'light';
-  applyTheme(state.theme); saveState();
-});
-document.getElementById('themeOptDark').addEventListener('click', ()=>{ state.theme='dark'; applyTheme('dark'); saveState(); });
-document.getElementById('themeOptLight').addEventListener('click', ()=>{ state.theme='light'; applyTheme('light'); saveState(); });
-
-/* ============================================================
-   LIVE CLOCK + PAYDAY COUNTDOWN
-   ============================================================ */
-function formatPaydayFull(dateStr){
-  const d = new Date(dateStr+'T00:00:00');
-  const weekday = d.toLocaleDateString('en-GB', {weekday:'long'});
-  const day = d.getDate();
-  const month = d.toLocaleDateString('en-GB', {month:'long'});
-  const suffix = (day%10===1 && day!==11) ? 'st' : (day%10===2 && day!==12) ? 'nd' : (day%10===3 && day!==13) ? 'rd' : 'th';
-  return weekday + ', ' + day + suffix + ' ' + month;
-}
-function updatePaydayCard(){
-  document.getElementById('lastPaydayVal').textContent = formatPaydayFull(state.lastPayDate);
-  document.getElementById('nextPaydayVal').textContent = formatPaydayFull(state.nextPayDate);
-
-  const next = new Date(state.nextPayDate+'T00:00:00');
-  const now = new Date();
-  const msLeft = next - now;
-  const cd = document.getElementById('paydayCountdown');
-  if(msLeft <= 0){ cd.textContent = 'Payday is today! 🎉'; return; }
-  const totalSec = Math.floor(msLeft/1000);
-  const days = Math.floor(totalSec/86400);
-  const hours = Math.floor((totalSec%86400)/3600);
-  const mins = Math.floor((totalSec%3600)/60);
-  const secs = totalSec%60;
-  cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
-}
-function startClock(){
-  function tick(){
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
-    const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
-    updatePaydayCard();
-  }
-  tick();
-  setInterval(tick, 1000);
-}
-
-/* ============================================================
-   LIVE QUOTE
-   ============================================================ */
-function dayOfYear(){
-  const now = new Date();
-  const start = new Date(now.getFullYear(),0,0);
-  return Math.floor((now-start)/86400000);
-}
-function fallbackQuote(){
-  const q = LOCAL_QUOTES[dayOfYear() % LOCAL_QUOTES.length];
-  renderQuote(q.text, q.author);
-}
-function renderQuote(text, author){
-  document.getElementById('quoteText').textContent = '"' + text + '"';
-  document.getElementById('quoteAuthor').textContent = author ? '— ' + author : '';
-}
-let lastQuoteIndex = -1;
-function randomLocalQuote(){
-  // Instant — no network wait. Avoids repeating the same quote twice in a row.
-  let idx;
-  do{ idx = Math.floor(Math.random()*LOCAL_QUOTES.length); }while(idx===lastQuoteIndex && LOCAL_QUOTES.length>1);
-  lastQuoteIndex = idx;
-  const q = LOCAL_QUOTES[idx];
-  renderQuote(q.text, q.author);
-}
-async function loadQuote(){
-  renderQuote('Loading…','');
-  try{
-    const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 2500);
-    const res = await fetch('https://api.quotable.io/random?tags=money|business|success', {signal: controller.signal});
-    clearTimeout(timeout);
-    if(!res.ok) throw new Error('bad response');
-    const data = await res.json();
-    if(data && data.content) renderQuote(data.content, data.author);
-    else fallbackQuote();
-  }catch(e){
-    fallbackQuote();
-  }
-}
-document.getElementById('refreshQuoteBtn').addEventListener('click', randomLocalQuote);
-
-/* ============================================================
-   STATUS LOGIC
-   ============================================================ */
-function statusForAmt(cat, s){
-  if(cat.threshold==null){
-    if(cat.budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
-    return s>=cat.budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
-  }
-  if(cat.budget<=0) return s>0 ? {label:'OVER BUDGET', cls:'st-over'} : {label:'No budget set', cls:'st-target'};
-  if(s>cat.budget) return {label:'OVER BUDGET', cls:'st-over'};
-  if(s/cat.budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
-  return {label:'On track', cls:'st-ok'};
-}
-function statusFor(cat){ return statusForAmt(cat, spentFor(cat.id)); }
-function barColor(status){
-  if(status.cls==='st-over') return 'var(--red)';
-  if(status.cls==='st-near') return 'var(--amber)';
-  if(status.cls==='st-target') return 'var(--muted-2)';
-  return 'var(--teal)';
-}
-
-/* ============================================================
-   RENDER: DASHBOARD
-   ============================================================ */
-function cycleLabelText(){
-  const last = new Date(state.lastPayDate+'T00:00:00');
-  const next = new Date(state.nextPayDate+'T00:00:00');
-  const opts = {day:'numeric', month:'short'};
-  return last.toLocaleDateString('en-GB',opts) + ' – ' + next.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-}
-
-function renderDashboard(){
-  const income = combinedIncome();
-  const spent = totalSpent();
-  const savingsContrib = savingsContribThisCycle();
-  const remaining = Math.max(income - spent - savingsContrib, 0);
-  const budget = totalBudget();
-
-  document.getElementById('cycleLabel').textContent = cycleLabelText();
-  document.getElementById('statIncome').textContent = fmt(income);
-  document.getElementById('statSpent').textContent = fmt(spent);
-  document.getElementById('statRemaining').textContent = fmt(remaining);
-
-  const compareEl = document.getElementById('spentCompare');
-  const lastCycle = state.history[state.history.length-1];
-  if(lastCycle && lastCycle.totalSpent > 0){
-    const diffPct = Math.round(((spent - lastCycle.totalSpent) / lastCycle.totalSpent) * 100);
-    if(diffPct <= 0){
-      compareEl.textContent = '↓ ' + Math.abs(diffPct) + '% vs last cycle';
-      compareEl.style.color = 'var(--teal)';
-    } else {
-      compareEl.textContent = '↑ ' + diffPct + '% vs last cycle';
-      compareEl.style.color = 'var(--red)';
-    }
-  } else {
-    compareEl.textContent = '';
-  }
-
-  const spendPctRaw = income>0 ? spent/income : 0;
-  const spendPct = Math.min(spendPctRaw, 1);
-  const { daysLeft, pacePct } = cyclePace();
-
-  const spendCirc = 276.46, paceCirc = 351.86;
-  const spendEl = document.getElementById('gaugeSpend');
-  const paceEl = document.getElementById('gaugePace');
-  spendEl.setAttribute('stroke-dasharray', spendCirc);
-  spendEl.setAttribute('stroke-dashoffset', spendCirc - spendPct*spendCirc);
-  spendEl.style.stroke = spendPctRaw > 1 ? 'var(--red)' : 'var(--teal)';
-  paceEl.setAttribute('stroke-dasharray', paceCirc);
-  paceEl.setAttribute('stroke-dashoffset', paceCirc - Math.min(pacePct,1)*paceCirc);
-
-  const gaugePctEl = document.getElementById('gaugePct');
-  gaugePctEl.textContent = Math.round(spendPctRaw*100)+'%';
-  gaugePctEl.style.color = spendPctRaw > 1 ? 'var(--red)' : 'var(--text)';
-
-  const budgetPct = budget>0 ? spent/budget : 0;
-  const paceBadge = document.getElementById('paceBadge');
-  const paceDiff = budgetPct - pacePct;
-  if(paceDiff <= -0.05){ paceBadge.textContent = '↓ Ahead of pace'; paceBadge.className = 'pace-badge pace-ahead'; }
-  else if(paceDiff >= 0.05){ paceBadge.textContent = '↑ Behind pace — spending fast'; paceBadge.className = 'pace-badge pace-behind'; }
-  else { paceBadge.textContent = '→ On track'; paceBadge.className = 'pace-badge pace-ontrack'; }
-
-  const remainingBudget = Math.max(budget - spent, 0);
-  document.getElementById('daysLeft').textContent = daysLeft;
-  document.getElementById('safeToday').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
-
-  const grandTotal = budget + totalSavingsBudget();
-  const bc = document.getElementById('budgetCheck');
-  document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
-  bc.classList.toggle('over', income>0 && grandTotal > income);
-
-  let alerts = 0;
-  state.categories.forEach(c=>{ const st = statusFor(c); if(st.cls==='st-over' || st.cls==='st-near') alerts++; });
-  document.getElementById('alertCount').textContent = alerts;
-
-  renderExtraIncome();
-  renderCategoryList();
-  renderTxPreview();
-}
-
-function renderExtraIncome(){
-  const wrap = document.getElementById('extraList');
-  document.getElementById('extraTag').textContent = fmt(extraTotal()) + ' added';
-  const sorted = [...state.extraIncome].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
-  if(!sorted.length){ wrap.innerHTML = '<div class="empty-hist">No extra income logged this cycle yet.</div>'; return; }
-  wrap.innerHTML = '';
-  sorted.forEach(e=>{
-    const row = document.createElement('div');
-    row.className = 'extra-row';
-    row.innerHTML = `
-      <div class="extra-left">
-        <div class="src">${escapeHtml(e.source)||'Extra income'}</div>
-        <div class="dt">${e.date}</div>
-      </div>
-      <div class="extra-right">
-        <div class="extra-amt">+${fmt(e.amount)}</div>
-        <button class="tx-del" data-id="${e.id}">✕</button>
-      </div>`;
-    wrap.appendChild(row);
-    row.querySelector('.tx-del').addEventListener('click', ()=>{
-      state.extraIncome = state.extraIncome.filter(x=>x.id!==e.id);
-      saveState(); renderAll();
-      showToast('Removed');
-    });
-  });
-}
-
-function renderCategoryList(){
-  const list = document.getElementById('catList');
-  list.innerHTML = '';
-  const cats = spendingCategories();
-  document.getElementById('catTag').textContent = cats.length + ' tracked';
-  cats.forEach(cat=>{
-    const spent = spentFor(cat.id);
-    const pct = cat.budget>0 ? Math.min(spent/cat.budget,1) : (spent>0?1:0);
-    const status = statusFor(cat);
-    const div = document.createElement('div');
-    div.className = 'cat';
-    div.innerHTML = `
-      <div class="cat-top">
-        <div>
-          <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
-          <div class="cat-group">${escapeHtml(cat.group)}</div>
-        </div>
-        <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(cat.budget)}</div>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill" style="width:${pct*100}%; background:${barColor(status)};"></div>
-        ${cat.threshold!=null ? `<div class="bar-thresh" style="left:${cat.threshold*100}%;"></div>` : ''}
-      </div>
-      <div class="status-row">
-        <span class="status-badge ${status.cls}">${status.label}</span>
-        <span style="font-size:10px;color:var(--muted);">${cat.budget>0?Math.round(pct*100):0}% used</span>
-      </div>
-    `;
-    list.appendChild(div);
-  });
-}
-
-function renderTxPreview(){
-  const wrap = document.getElementById('txListPreview');
-  const sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id).slice(0,5);
-  document.getElementById('txTag').textContent = state.transactions.length + ' this cycle';
-  wrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">No expenses logged yet. Tap + to add one.</div>';
-  sorted.forEach(t=>renderTxRow(wrap, t, true));
-}
-
-function renderTxRow(container, t, showDelete){
-  const cat = catById(t.categoryId);
-  const savingsTag = cat && cat.group==='Savings' ? '<span class="tx-tag-savings">SAVINGS</span>' : '';
-  const methodTag = t.method ? ' · ' + escapeHtml(t.method) : '';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'tx-swipe-wrap';
-  wrap.innerHTML = `
-    <div class="tx-swipe-actions">
-      <button class="tx-swipe-btn tx-swipe-edit" aria-label="Edit">✏️</button>
-      ${showDelete ? `<button class="tx-swipe-btn tx-swipe-del" aria-label="Delete">🗑</button>` : ''}
-    </div>
-    <div class="tx-row" style="cursor:pointer;">
-      <div class="tx-left">
-        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}</div>
-        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
-      </div>
-      <div style="display:flex;align-items:center;">
-        <div class="tx-right">
-          <div class="tx-amt">${fmt(t.amount)}</div>
-          <div class="tx-date">${t.date}</div>
-        </div>
-        ${showDelete ? `<button class="tx-del" data-id="${t.id}">✕</button>` : ''}
-      </div>
-    </div>
-  `;
-  container.appendChild(wrap);
-  const row = wrap.querySelector('.tx-row');
-
-  // Tap / click to edit (desktop and a non-drag tap on mobile)
-  row.addEventListener('click', (e)=>{
-    if(e.target.closest('.tx-del')) return;
-    if(row.dataset.dragged==='1'){ row.dataset.dragged='0'; return; }
-    openEditTx(t);
-  });
-  wrap.querySelector('.tx-swipe-edit').addEventListener('click', (e)=>{
-    e.stopPropagation(); resetSwipe(row); openEditTx(t);
-  });
-  if(showDelete){
-    row.querySelector('.tx-del').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
-    });
-    const delBtn = wrap.querySelector('.tx-swipe-del');
-    if(delBtn) delBtn.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
-    });
-  }
-  attachSwipe(row);
-}
-
-/* Swipe-to-reveal: drag a transaction row left to expose Edit/Delete buttons underneath. */
-const SWIPE_REVEAL = 76;
-let openSwipeRow = null;
-function resetSwipe(row){ row.style.transition='transform .2s ease'; row.style.transform='translateX(0)'; if(openSwipeRow===row) openSwipeRow=null; }
-function attachSwipe(row){
-  let startX=0, dx=0, dragging=false;
-  row.addEventListener('touchstart', e=>{
-    if(openSwipeRow && openSwipeRow!==row) resetSwipe(openSwipeRow);
-    startX = e.touches[0].clientX; dragging = true; dx = 0;
-    row.dataset.dragged = '0';
-    row.style.transition = 'none';
-  }, {passive:true});
-  row.addEventListener('touchmove', e=>{
-    if(!dragging) return;
-    dx = e.touches[0].clientX - startX;
-    if(Math.abs(dx) > 6) row.dataset.dragged = '1';
-    const x = Math.min(0, Math.max(-SWIPE_REVEAL, dx));
-    row.style.transform = 'translateX(' + x + 'px)';
-  }, {passive:true});
-  row.addEventListener('touchend', ()=>{
-    dragging = false;
-    row.style.transition = 'transform .2s ease';
-    if(dx < -SWIPE_REVEAL*0.5){
-      row.style.transform = 'translateX(-' + SWIPE_REVEAL + 'px)';
-      openSwipeRow = row;
-    } else {
-      row.style.transform = 'translateX(0)';
-      if(openSwipeRow===row) openSwipeRow = null;
-    }
-  });
-}
-
-/* ============================================================
-   RENDER: SAVINGS
-   ============================================================ */
-function renderSavingsTab(){
-  const wrap = document.getElementById('savingsList');
-  const cats = savingsCategories();
-  if(!cats.length){ wrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No savings categories set up.</div>'; return; }
-  wrap.innerHTML = '';
-  cats.forEach(cat=>{
-    const total = lifetimeSaved(cat.id);
-    const thisCycle = spentFor(cat.id);
-    const goal = Number(cat.goal)||0;
-    const pct = goal>0 ? Math.min(total/goal,1) : 0;
-    const div = document.createElement('div');
-    div.className = 'save-card';
-    div.innerHTML = `
-      <div class="save-top">
-        <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
-        <div class="save-amt">${fmt(total)}</div>
-      </div>
-      <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
-      ${goal>0 ? `
-        <div class="save-bar-track"><div class="save-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="save-foot"><span>${Math.round(pct*100)}% of goal</span><span>Goal: ${fmt(goal)}</span></div>
-      ` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
-    `;
-    wrap.appendChild(div);
-  });
-}
-
-/* ============================================================
-   RENDER: DEBT TRACKER
-   ============================================================ */
-function renderDebtTab(){
-  document.getElementById('stratAvalanche').classList.toggle('active', state.debtStrategy==='avalanche');
-  document.getElementById('stratSnowball').classList.toggle('active', state.debtStrategy==='snowball');
-  document.getElementById('stratManual').classList.toggle('active', state.debtStrategy==='manual');
-
-  const owed = totalDebtOwed(), paid = totalDebtPaid(), remaining = totalDebtRemaining();
-  document.getElementById('debtSummary').innerHTML = `
-    <div class="hist-card"><div class="v">${fmt(owed)}</div><div class="l">Total owed</div></div>
-    <div class="hist-card"><div class="v">${fmt(paid)}</div><div class="l">Total paid</div></div>
-    <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Remaining</div></div>
-  `;
-
-  const focus = suggestedFocusDebt();
-  const focusWrap = document.getElementById('debtFocusCard');
-  if(!focus){
-    focusWrap.innerHTML = '<div class="debt-focus-empty">No active debt to focus on — add a debt below, or you\'re debt-free! 🎉</div>';
-  } else {
-    const why = state.debtStrategy==='avalanche' ? 'Highest interest rate (' + (focus.interestRate||0) + '%/yr) — clearing this first saves the most money over time.'
-      : state.debtStrategy==='snowball' ? 'Smallest remaining balance — clearing this first builds momentum fastest.'
-      : 'Manually selected as your current focus.';
-    const rem = remainingForDebt(focus);
-    const pct = focus.amount>0 ? Math.min(paidForDebt(focus.id)/focus.amount,1) : 0;
-    focusWrap.innerHTML = `
-      <div class="debt-focus-card">
-        <div class="focus-badge">CURRENTLY SERVICING</div>
-        <div class="debt-top"><div class="debt-name">${escapeHtml(focus.creditor)}</div><div class="debt-amt">${fmt(rem)} left</div></div>
-        <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
-        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% paid off</span><span>Owed: ${fmt(focus.amount)}</span></div>
-        <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px;">${why}</p>
-        <button class="btn btn-teal" style="margin:0;" data-debtpay="${focus.id}">Log a payment</button>
-      </div>
-    `;
-    focusWrap.querySelector('[data-debtpay]').addEventListener('click', ()=> openDebtPaySheet(focus.id));
-  }
-
-  const listWrap = document.getElementById('debtList');
-  document.getElementById('debtTag').textContent = state.debts.length + ' tracked';
-  if(!state.debts.length){
-    listWrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No debts added yet.</div>';
-  } else {
-    listWrap.innerHTML = '';
-    state.debts.forEach(debt=>{
-      const rem = remainingForDebt(debt);
-      const pct = debt.amount>0 ? Math.min(paidForDebt(debt.id)/debt.amount,1) : 0;
-      const isFocused = focus && focus.id===debt.id;
-      const div = document.createElement('div');
-      div.className = 'debt-card' + (isFocused ? ' focused' : '');
-      div.innerHTML = `
-        <div class="debt-top">
-          <div class="debt-name">${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
-          <div class="debt-amt">${rem<=0 ? '✅ Cleared' : fmt(rem)+' left'}</div>
-        </div>
-        <div class="debt-reason">${escapeHtml(debt.reason)||'—'}${debt.interestRate ? ' · '+debt.interestRate+'%/yr' : ''}</div>
-        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% paid</span><span>Owed: ${fmt(debt.amount)}</span></div>
-        <div class="debt-actions">
-          ${rem>0 ? `<button class="debt-btn-pay" data-pay="${debt.id}">Log payment</button>` : ''}
-          ${state.debtStrategy==='manual' && rem>0 ? `<button class="debt-btn-focus" data-focus="${debt.id}">${isFocused?'Focused':'Set as focus'}</button>` : ''}
-          <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}">🗑</button>
-        </div>
-      `;
-      listWrap.appendChild(div);
-    });
-    listWrap.querySelectorAll('[data-pay]').forEach(b=>b.addEventListener('click', ()=>openDebtPaySheet(b.dataset.pay)));
-    listWrap.querySelectorAll('[data-focus]').forEach(b=>b.addEventListener('click', ()=>{
-      state.debtFocusId = b.dataset.focus; saveState(); renderAll();
-    }));
-    listWrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
-      const paidAmt = paidForDebt(b.dataset.del);
-      const msg = paidAmt>0
-        ? `${b.dataset.name} has ${fmt(paidAmt)} in logged payments. Deleting it keeps those as regular Debt repayment expenses, just no longer tied to this creditor. Continue?`
-        : `Delete "${b.dataset.name}"? This can't be undone.`;
-      const ok = await askConfirm('Delete debt?', msg);
-      if(!ok) return;
-      state.debts = state.debts.filter(d=>d.id!==b.dataset.del);
-      if(state.debtFocusId===b.dataset.del) state.debtFocusId = '';
-      saveState(); renderAll();
-      showToast('Debt deleted');
-    }));
-  }
-}
-
-document.getElementById('financeTabDebt').addEventListener('click', ()=>{
-  document.getElementById('financeTabDebt').classList.add('active');
-  document.getElementById('financeTabSavings').classList.remove('active');
-  document.getElementById('financePanelDebt').style.display = '';
-  document.getElementById('financePanelSavings').style.display = 'none';
-});
-document.getElementById('financeTabSavings').addEventListener('click', ()=>{
-  document.getElementById('financeTabSavings').classList.add('active');
-  document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financePanelSavings').style.display = '';
-  document.getElementById('financePanelDebt').style.display = 'none';
-});
-document.getElementById('financeTabDebt').classList.add('active');
-
-document.getElementById('stratAvalanche').addEventListener('click', ()=>{ state.debtStrategy='avalanche'; saveState(); renderAll(); });
-document.getElementById('stratSnowball').addEventListener('click', ()=>{ state.debtStrategy='snowball'; saveState(); renderAll(); });
-document.getElementById('stratManual').addEventListener('click', ()=>{ state.debtStrategy='manual'; saveState(); renderAll(); });
-
-document.getElementById('addDebtBtn').addEventListener('click', ()=>{
-  const creditor = document.getElementById('newDebtCreditor').value.trim();
-  const reason = document.getElementById('newDebtReason').value.trim();
-  const amount = Number(document.getElementById('newDebtAmount').value);
-  const interestRate = Number(document.getElementById('newDebtInterest').value) || 0;
-  if(!creditor){ showToast('Enter who the debt is owed to'); return; }
-  if(!amount || amount<=0){ showToast('Enter a valid amount owed'); return; }
-  state.debts.push({ id: 'debt-'+Date.now(), creditor, reason, amount, interestRate });
-  saveState(); renderAll();
-  document.getElementById('newDebtCreditor').value='';
-  document.getElementById('newDebtReason').value='';
-  document.getElementById('newDebtAmount').value='';
-  document.getElementById('newDebtInterest').value='';
-  showToast('Debt added');
-});
-
-const debtPaySheet = document.getElementById('debtPaySheet');
-let payingDebtId = null;
-function openDebtPaySheet(debtId){
-  payingDebtId = debtId;
-  const debt = debtById(debtId);
-  document.getElementById('debtPayTitle').textContent = 'Log payment — ' + (debt ? debt.creditor : '');
-  document.getElementById('debtPayAmount').value = '';
-  document.getElementById('debtPayMethod').value = '';
-  document.getElementById('debtPayDate').value = toDateInput(new Date());
-  activeSheet = debtPaySheet; openSheetEl(debtPaySheet);
-}
-document.getElementById('debtPayCancelBtn').addEventListener('click', ()=>{ closeSheetEl(debtPaySheet); activeSheet=null; payingDebtId=null; });
-document.getElementById('debtPaySaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('debtPayAmount').value);
-  const method = document.getElementById('debtPayMethod').value;
-  const date = document.getElementById('debtPayDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  const debt = debtById(payingDebtId);
-  state.transactions.push({
-    id: Date.now(), amount, categoryId: 'debt',
-    desc: (debt ? debt.creditor : 'Debt') + ' — debt payment',
-    date, method, debtId: payingDebtId
-  });
-  saveState(); renderAll();
-  closeSheetEl(debtPaySheet); activeSheet=null; payingDebtId=null;
-  showToast('Payment logged');
-});
-
-/* ============================================================
-   RENDER: HISTORY
-   ============================================================ */
-function renderHistory(){
-  const summaryWrap = document.getElementById('histSummary');
-  const spent = totalSpent();
-  const savingsContrib = savingsContribThisCycle();
-  const income = combinedIncome();
-  summaryWrap.innerHTML = `
-    <div class="hist-card"><div class="v">${fmt(income)}</div><div class="l">This cycle income</div></div>
-    <div class="hist-card"><div class="v">${fmt(spent)}</div><div class="l">This cycle spent</div></div>
-    <div class="hist-card"><div class="v">${income>0?Math.round((savingsContrib/income)*100):0}%</div><div class="l">Savings rate</div></div>
-  `;
-
-  const chartWrap = document.getElementById('histChartWrap');
-  const budget = totalBudget();
-  const cycles = [...state.history, {label: cycleLabelText(), income: income, totalBudget: budget, totalSpent: spent}];
-  if(cycles.length===0){
-    chartWrap.innerHTML = '<div class="empty-hist">Archive a cycle from Settings to start building your history.</div>';
-  } else {
-    const maxVal = Math.max(...cycles.map(c=>Math.max(c.income, c.totalSpent, c.totalBudget)), 1);
-    let rows = '';
-    cycles.slice(-6).forEach(c=>{
-      const incW = (c.income/maxVal)*100;
-      const spendW = (c.totalSpent/maxVal)*100;
-      rows += `
-        <div class="chart-row">
-          <div class="m">${escapeHtml(c.label)}</div>
-          <div class="chart-bars">
-            <div class="chart-bar" style="width:${incW}%; background:var(--gold); height:8px;"></div>
-            <div class="chart-bar" style="width:${spendW}%; background:var(--teal); height:8px;"></div>
-          </div>
-        </div>`;
-    });
-    chartWrap.innerHTML = `
-      <div class="chart">
-        <div class="chart-rows">${rows}</div>
-        <div class="chart-legend">
-          <div class="legend-item"><span class="legend-dot" style="background:var(--gold);"></span>Income</div>
-          <div class="legend-item"><span class="legend-dot" style="background:var(--teal);"></span>Spent</div>
-        </div>
-      </div>`;
-  }
-
-  const txWrap = document.getElementById('txListFull');
-  const sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
-  document.getElementById('txTagFull').textContent = sorted.length + ' logged';
-  txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">No expenses logged this cycle yet.</div>';
-  sorted.forEach(t=>renderTxRow(txWrap, t, true));
-
-  renderPastCycles();
-  renderYearSelect();
-}
-
-function renderPastCycles(){
-  const wrap = document.getElementById('pastCyclesList');
-  document.getElementById('pastCyclesTag').textContent = state.history.length + ' archived';
-  if(!state.history.length){ wrap.innerHTML = '<div class="empty-hist">No archived cycles yet — use "Archive this cycle" in Settings once a pay cycle ends.</div>'; return; }
-  wrap.innerHTML = '';
-  [...state.history].reverse().forEach(h=>{
-    const row = document.createElement('div');
-    row.className = 'tx-row';
-    row.innerHTML = `
-      <div class="tx-left">
-        <div class="tx-cat">${escapeHtml(h.label)}</div>
-        <div class="tx-desc">Income ${fmt(h.income)} · Spent ${fmt(h.totalSpent)}</div>
-      </div>
-      <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
-    `;
-    row.querySelector('button').addEventListener('click', ()=> openReportForHistory(h));
-    wrap.appendChild(row);
-  });
-}
-
-function renderYearSelect(){
-  const sel = document.getElementById('yearSelect');
-  const current = sel.value;
-  const years = availableYears();
-  sel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
-  if(years.includes(current)) sel.value = current;
-}
-document.getElementById('yearReportBtn').addEventListener('click', ()=>{
-  const year = document.getElementById('yearSelect').value;
-  if(!year){ showToast('No year selected'); return; }
-  openYearReport(year);
-});
-
-/* ============================================================
-   RENDER: SETTINGS
-   ============================================================ */
-function renderSettings(){
-  document.getElementById('incomeCurrentDisplay').textContent = 'Current: ' + fmt(state.income);
-  document.getElementById('emailCurrentDisplay').textContent = 'Current: ' + (state.email || 'not set');
-  document.getElementById('paydayInput').value = state.paydayDay || 25;
-  document.getElementById('cycleCurrentDisplay').textContent = 'Current cycle: ' + cycleLabelText();
-
-  const budget = totalBudget();
-  const income = combinedIncome();
-  const totalLine = document.getElementById('budgetTotalLine');
-  document.getElementById('budgetTotalVal').textContent = fmt(budget) + (income>0 ? ' (' + Math.round(budget/income*100) + '% of income)' : '');
-  totalLine.classList.toggle('over', income>0 && (budget + totalSavingsBudget()) > income);
-
-  const wrap = document.getElementById('settingsCatList');
-  wrap.innerHTML = '';
-  state.categories.forEach(cat=>{
-    const div = document.createElement('div');
-    div.className = 'settings-cat';
-    const isSavings = cat.group === 'Savings';
-    div.innerHTML = `
-      <div class="settings-cat-name" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></span>
-        <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category"
-          style="background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px;">🗑</button>
-      </div>
-      <div class="settings-row">
-        <div class="field">
-          <label>${isSavings ? 'Per-cycle target ₦' : 'Budget ₦'}</label>
-          <input type="number" class="cat-budget" data-id="${cat.id}" value="${cat.budget}" min="0" step="1">
-        </div>
-        ${!isSavings ? `
-        <div class="field">
-          <label>Alert %</label>
-          <input type="number" class="cat-threshold" data-id="${cat.id}" value="${Math.round(cat.threshold*100)}" min="1" max="100">
-        </div>` : `
-        <div class="field">
-          <label>Lifetime goal ₦</label>
-          <input type="number" class="cat-goal" data-id="${cat.id}" value="${cat.goal||0}" min="0" step="1">
-        </div>`}
-      </div>
-    `;
-    wrap.appendChild(div);
-  });
-  wrap.querySelectorAll('.cat-budget').forEach(inp=>{
-    inp.addEventListener('change', e=>{
-      catById(e.target.dataset.id).budget = Math.max(Number(e.target.value)||0, 0);
-      saveState(); renderAll();
-    });
-  });
-  wrap.querySelectorAll('.cat-threshold').forEach(inp=>{
-    inp.addEventListener('change', e=>{
-      catById(e.target.dataset.id).threshold = Math.min(Math.max(Number(e.target.value)||1,1),100)/100;
-      saveState(); renderAll();
-    });
-  });
-  wrap.querySelectorAll('.cat-goal').forEach(inp=>{
-    inp.addEventListener('change', e=>{
-      catById(e.target.dataset.id).goal = Math.max(Number(e.target.value)||0, 0);
-      saveState(); renderAll();
-    });
-  });
-  wrap.querySelectorAll('.cat-delete').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const id = btn.dataset.id;
-      const spent = spentFor(id);
-      const msg = spent > 0
-        ? `"${btn.dataset.name}" has ${fmt(spent)} logged against it this cycle. Deleting it will leave those transactions uncategorized (they won't be removed). Continue?`
-        : `Delete "${btn.dataset.name}"? This can't be undone.`;
-      const ok = await askConfirm('Delete category?', msg);
-      if(!ok) return;
-      state.categories = state.categories.filter(c=>c.id!==id);
-      saveState(); renderAll();
-      showToast('Category deleted');
-    });
-  });
-}
-
-/* ============================================================
-   RENDER ALL + NAV
-   ============================================================ */
-function renderAll(){
-  refreshCycleDates();
-  renderDashboard();
-  renderSavingsTab();
-  renderDebtTab();
-  renderHistory();
-  renderSettings();
-  const sel = document.getElementById('txCategory');
-  sel.innerHTML = state.categories.map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}${c.group==='Savings'?' (savings)':''}</option>`).join('');
-}
-
-document.querySelectorAll('.nav-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-    document.getElementById('view-'+btn.dataset.view).classList.add('active');
-  });
-});
-
-/* ============================================================
-   SHEETS
-   ============================================================ */
-const overlay = document.getElementById('overlay');
-function openSheetEl(el){ overlay.classList.add('show'); el.classList.add('show'); }
-function closeSheetEl(el){ overlay.classList.remove('show'); el.classList.remove('show'); }
-let activeSheet = null;
-overlay.addEventListener('click', ()=>{ if(activeSheet) closeSheetEl(activeSheet); activeSheet=null; });
-
-const addSheet = document.getElementById('addSheet');
-let editingTxId = null;
-document.getElementById('fabAdd').addEventListener('click', ()=>{
-  editingTxId = null;
-  document.getElementById('addSheetTitle').textContent = 'Log an expense';
-  document.getElementById('txSaveBtn').textContent = 'Add expense';
-  document.getElementById('txAmount').value = '';
-  document.getElementById('txDesc').value = '';
-  document.getElementById('txMethod').value = '';
-  document.getElementById('txCategory').value = state.categories[0] ? state.categories[0].id : '';
-  document.getElementById('txDate').value = toDateInput(new Date());
-  activeSheet = addSheet; openSheetEl(addSheet);
-});
-function openEditTx(t){
-  editingTxId = t.id;
-  document.getElementById('addSheetTitle').textContent = 'Edit expense';
-  document.getElementById('txSaveBtn').textContent = 'Save changes';
-  document.getElementById('txAmount').value = t.amount;
-  document.getElementById('txCategory').value = t.categoryId;
-  document.getElementById('txMethod').value = t.method || '';
-  document.getElementById('txDesc').value = t.desc || '';
-  document.getElementById('txDate').value = t.date;
-  activeSheet = addSheet; openSheetEl(addSheet);
-}
-document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
-document.getElementById('txSaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('txAmount').value);
-  const categoryId = document.getElementById('txCategory').value;
-  const method = document.getElementById('txMethod').value;
-  const desc = document.getElementById('txDesc').value.trim();
-  const date = document.getElementById('txDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-
-  if(editingTxId != null){
-    const t = state.transactions.find(x=>x.id===editingTxId);
-    if(t){ Object.assign(t, {amount, categoryId, method, desc, date}); }
-    showToast('Expense updated');
-  } else {
-    state.transactions.push({id: Date.now(), amount, categoryId, desc, date, method});
-    showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
-  }
-  saveState(); renderAll();
-  closeSheetEl(addSheet); activeSheet=null; editingTxId=null;
-  document.getElementById('txAmount').value=''; document.getElementById('txDesc').value='';
-});
-
-const extraSheet = document.getElementById('extraSheet');
-document.getElementById('addExtraBtn').addEventListener('click', ()=>{
-  document.getElementById('extraDate').value = toDateInput(new Date());
-  activeSheet = extraSheet; openSheetEl(extraSheet);
-});
-document.getElementById('extraCancelBtn').addEventListener('click', ()=>{ closeSheetEl(extraSheet); activeSheet=null; });
-document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('extraAmount').value);
-  const source = document.getElementById('extraSource').value.trim();
-  const date = document.getElementById('extraDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  state.extraIncome.push({id: Date.now(), amount, source, date});
-  saveState(); renderAll();
-  closeSheetEl(extraSheet); activeSheet=null;
-  document.getElementById('extraAmount').value=''; document.getElementById('extraSource').value='';
-  showToast('Extra income added — buffered into your totals');
-});
-
-/* ============================================================
-   AI ASSISTANT (floating widget, chat-style, persisted history)
-   ============================================================ */
-const aiSheet = document.getElementById('aiSheet');
-function renderAiChat(){
-  const wrap = document.getElementById('aiChat');
-  if(!state.aiHistory.length){
-    wrap.innerHTML = '<div class="ai-empty">Ask me anything about this cycle — e.g. "Am I overspending on transport?" or "How much more can I save?"</div>';
-    return;
-  }
-  wrap.innerHTML = '';
-  state.aiHistory.forEach(msg=>{
-    const bubble = document.createElement('div');
-    bubble.className = 'ai-bubble ' + msg.role + (msg.error ? ' error' : '');
-    bubble.textContent = msg.text;
-    wrap.appendChild(bubble);
-  });
-  wrap.scrollTop = wrap.scrollHeight;
-}
-document.getElementById('askAiFab').addEventListener('click', ()=>{
-  if(!API_URL){
-    showToast('Connect a backend first (see Settings) — the AI assistant needs one');
-    return;
-  }
-  renderAiChat();
-  activeSheet = aiSheet; openSheetEl(aiSheet);
-  setTimeout(()=>document.getElementById('aiQuestion').focus(), 300);
-});
-document.getElementById('aiCloseBtn').addEventListener('click', ()=>{ closeSheetEl(aiSheet); activeSheet=null; });
-document.getElementById('aiClearBtn').addEventListener('click', async ()=>{
-  if(!state.aiHistory.length) return;
-  const ok = await askConfirm('Clear conversation?', 'This deletes your AI chat history. This can\'t be undone.');
-  if(!ok) return;
-  state.aiHistory = [];
-  saveState(); renderAiChat();
-});
-async function sendAiQuestion(){
-  const input = document.getElementById('aiQuestion');
-  const q = input.value.trim();
-  if(!q) return;
-  state.aiHistory.push({id: Date.now(), role:'user', text:q});
-  input.value = '';
-  renderAiChat();
-  const thinkingId = Date.now()+1;
-  state.aiHistory.push({id: thinkingId, role:'bot', text:'Thinking…'});
-  renderAiChat();
-  try{
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action:'askAI', question: q, token: API_TOKEN})
-    });
-    const data = await res.json();
-    const msg = state.aiHistory.find(m=>m.id===thinkingId);
-    if(msg){
-      msg.text = data.answer || data.error || 'No response — try again.';
-      msg.error = !data.answer;
-    }
-  }catch(e){
-    const msg = state.aiHistory.find(m=>m.id===thinkingId);
-    if(msg){ msg.text = 'Could not reach the AI assistant — check your connection.'; msg.error = true; }
-  }
-  saveState(); renderAiChat();
-}
-document.getElementById('aiAskBtn').addEventListener('click', sendAiQuestion);
-document.getElementById('aiQuestion').addEventListener('keydown', (e)=>{
-  if(e.key==='Enter'){ e.preventDefault(); sendAiQuestion(); }
-});
-
-/* ============================================================
-   PERSONAL NOTES (Guide tab) — auto-saves as you type
-   ============================================================ */
-let notesSaveTimer = null;
-document.getElementById('personalNotesInput').addEventListener('input', (e)=>{
-  state.personalNotes = e.target.value;
-  clearTimeout(notesSaveTimer);
-  const label = document.getElementById('notesSavedLabel');
-  label.textContent = 'Saving…';
-  notesSaveTimer = setTimeout(()=>{
-    saveState();
-    label.textContent = 'Saved ' + new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-  }, 700);
-});
-
-/* ============================================================
-   SETTINGS ACTIONS
-   ============================================================ */
-document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
-  const incomeVal = document.getElementById('incomeInput').value;
-  const payVal = document.getElementById('paydayInput').value;
-  const emailVal = document.getElementById('emailInput').value.trim();
-
-  if(incomeVal !== '') state.income = Math.max(Number(incomeVal)||0, 0);
-  if(payVal !== '') state.paydayDay = Math.min(Math.max(Number(payVal)||25, 1), 28);
-  if(emailVal !== '') state.email = emailVal;
-
-  refreshCycleDates();
-  saveState(); renderAll();
-
-  document.getElementById('incomeInput').value = '';
-  document.getElementById('emailInput').value = '';
-  showToast('Saved');
-});
-
-document.getElementById('addCatBtn').addEventListener('click', ()=>{
-  const name = document.getElementById('newCatName').value.trim();
-  const group = document.getElementById('newCatGroup').value;
-  if(!name){ showToast('Enter a category name'); return; }
-
-  const baseId = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'category';
-  let id = baseId, n = 1;
-  while(catById(id)){ id = baseId + '-' + (++n); }
-
-  const icon = DEFAULT_ICON_BY_GROUP[group] || '📌';
-  const newCat = group === 'Savings'
-    ? { id, name, group, budget:0, threshold:null, goal:0, icon }
-    : { id, name, group, budget:0, threshold:0.85, icon };
-  state.categories.push(newCat);
-  saveState(); renderAll();
-  document.getElementById('newCatName').value = '';
-  showToast('"' + name + '" added');
-});
-
-document.getElementById('resetBudgetsBtn').addEventListener('click', async ()=>{
-  const ok = await askConfirm('Reset all budgets to ₦0?',
-    'This clears the Budget/Target amount on every category (Needs, Wants, and Savings). Category names, alert %, and goals are kept. This can\'t be undone.');
-  if(!ok) return;
-  state.categories.forEach(c => c.budget = 0);
-  saveState(); renderAll();
-  showToast('All budgets reset to ₦0');
-});
-
-/* ============================================================
-   REPORT: DATA + CHARTS + PDF
-   ============================================================ */
-function buildReportData(snapshot){
-  const txs = snapshot ? snapshot.transactions : state.transactions;
-  const income = snapshot ? snapshot.income : combinedIncome();
-  const spent = txs.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-  const budget = snapshot ? (snapshot.budget!=null ? snapshot.budget : 0) : totalBudget();
-  const savingsContrib = txs.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-  const remaining = Math.max(income - spent - savingsContrib, 0);
-  const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
-
-  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(txs,c.id), budget:c.budget }))
-    .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
-
-  const byDay = {};
-  txs.filter(t=>!isSavingsCat(t.categoryId)).forEach(t=>{ byDay[t.date] = (byDay[t.date]||0) + Number(t.amount); });
-  const dailyEntries = Object.keys(byDay).sort().map(d=>({date:d, amount:byDay[d]}));
-  const highestDay = dailyEntries.slice().sort((a,b)=>b.amount-a.amount)[0];
-
-  const overBudget = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-over');
-  const nearLimit = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-near');
-
-  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit };
-}
-
-function generateReportText(d, periodLabel, note){
-  const lines = [];
-  lines.push('BUDGET COCKPIT — REPORT');
-  lines.push(periodLabel || ('Cycle: ' + cycleLabelText()));
-  lines.push('Generated: ' + new Date().toLocaleString('en-GB'));
-  if(note) lines.push(note);
-  lines.push('');
-  lines.push('INCOME & SPENDING');
-  lines.push('Total income: ' + fmt(d.income));
-  lines.push('Total spent (excludes savings contributions): ' + fmt(d.spent));
-  lines.push('Total budgeted: ' + fmt(d.budget));
-  lines.push('Savings/Emergency Fund contributed: ' + fmt(d.savingsContrib) + ' (' + d.savingsRate + '% of income)');
-  lines.push('Remaining to spend: ' + fmt(d.remaining));
-  lines.push('');
-  lines.push('TOP SPENDING CATEGORIES');
-  if(d.spentByCat.length===0) lines.push('No expenses logged this period.');
-  d.spentByCat.slice(0,3).forEach((x,i)=> lines.push((i+1) + '. ' + x.name + ': ' + fmt(x.spent) + (x.budget>0 ? ' of ' + fmt(x.budget) + ' budgeted' : ' (no budget set)')));
-  lines.push('');
-  if(d.highestDay) lines.push('Highest single-day spend: ' + d.highestDay.date + ' (' + fmt(d.highestDay.amount) + ')');
-  lines.push('');
-  lines.push('ALERTS');
-  lines.push(d.overBudget.length ? 'Over budget: ' + d.overBudget.map(c=>c.name).join(', ') : 'No categories over budget.');
-  lines.push(d.nearLimit.length ? 'Near limit: ' + d.nearLimit.map(c=>c.name).join(', ') : 'No categories near their limit.');
-  lines.push('');
-  lines.push('SUGGESTIONS');
-  const suggestions = [];
-  if(d.savingsRate < 20 && d.income>0) suggestions.push('Savings rate is below the commonly-cited 20% baseline — consider trimming ' + (d.spentByCat[0] ? d.spentByCat[0].name : 'your largest category') + ' next cycle.');
-  if(d.overBudget.length) suggestions.push('Set a firm cap or cut back next cycle on: ' + d.overBudget.map(c=>c.name).join(', ') + '.');
-  if(!d.overBudget.length && !d.nearLimit.length && d.savingsRate>=20) suggestions.push('Solid cycle — spending stayed within budget and savings rate is at/above the general benchmark.');
-  if(suggestions.length===0) suggestions.push('Log a few more expenses for a more useful pattern report next cycle.');
-  suggestions.forEach(s=>lines.push('• ' + s));
-  return lines.join('\n');
-}
-
-const PIE_COLORS = ['#E8B14C','#3FC7B0','#FF6B6B','#F2B84B','#8892A6','#B8802A','#128C77'];
-function drawPieChart(canvas, data){
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const total = data.reduce((s,x)=>s+x.spent,0);
-  if(!total){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No spending yet', 20, canvas.height/2); return; }
-  const cx = 70, cy = canvas.height/2, r = 60;
-  let start = -Math.PI/2;
-  data.slice(0,6).forEach((x,i)=>{
-    const slice = (x.spent/total) * Math.PI*2;
-    ctx.beginPath(); ctx.moveTo(cx,cy);
-    ctx.arc(cx,cy,r,start,start+slice);
-    ctx.closePath();
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
-    ctx.fill();
-    start += slice;
-  });
-  let ly = 14;
-  data.slice(0,6).forEach((x,i)=>{
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
-    ctx.fillRect(148, ly, 8, 8);
-    ctx.fillStyle = '#333'; ctx.font = '9px sans-serif';
-    ctx.fillText(x.name.slice(0,14), 160, ly+8);
-    ly += 14;
-  });
-}
-function drawBarChart(canvas, entries){
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!entries.length){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No daily spend yet', 20, canvas.height/2); return; }
-  const max = Math.max(...entries.map(e=>e.amount), 1);
-  const w = canvas.width, h = canvas.height, pad=20, barW = Math.max((w-pad*2)/entries.length - 4, 2);
-  entries.forEach((e,i)=>{
-    const barH = (e.amount/max) * (h - pad*2);
-    const x = pad + i*((w-pad*2)/entries.length);
-    ctx.fillStyle = '#3FC7B0';
-    ctx.fillRect(x, h-pad-barH, barW, barH);
-  });
-  ctx.fillStyle = '#8892A6'; ctx.font = '9px sans-serif';
-  ctx.fillText(entries[0].date.slice(5), pad, h-6);
-  ctx.fillText(entries[entries.length-1].date.slice(5), w-pad-28, h-6);
-}
-
-const reportSheet = document.getElementById('reportSheet');
-let currentReportFilename = 'budget-report';
-let currentPeriodLabel = '';
-let currentReportD = null;
-
-function showReport(d, opts){
-  opts = opts || {};
-  currentReportD = d;
-  document.getElementById('reportTitle').textContent = opts.title || 'Cycle report';
-  document.getElementById('reportPieLabel').textContent = 'By category' + (opts.pieNote ? ' (' + opts.pieNote + ')' : '');
-  document.getElementById('reportBarLabel').textContent = opts.barLabel || 'Daily spend';
-  document.getElementById('reportText').value = generateReportText(d, opts.periodLabel, opts.note);
-  drawPieChart(document.getElementById('reportPieCanvas'), d.spentByCat);
-  drawBarChart(document.getElementById('reportBarCanvas'), d.dailyEntries);
-  currentReportFilename = opts.filename || 'budget-report';
-  currentPeriodLabel = opts.periodLabel || ('Cycle: ' + cycleLabelText());
-  activeSheet = reportSheet; openSheetEl(reportSheet);
-}
-
-function openReport(){
-  const d = buildReportData();
-  showReport(d, {
-    title: 'Cycle report',
-    periodLabel: 'Cycle: ' + cycleLabelText(),
-    barLabel: 'Daily spend',
-    filename: 'budget-report-' + state.nextPayDate
-  });
-}
-
-// Past cycle: rebuilt from the transaction snapshot captured at archive time.
-// Note: uses that cycle's own budget total, but current category names/order —
-// a category renamed since then will show under its current name.
-function openReportForHistory(h){
-  const snapshot = {
-    transactions: h.transactions || [],
-    extraIncome: h.extraIncome || [],
-    income: h.income,
-    budget: h.totalBudget
-  };
-  const d = buildReportData(snapshot);
-  const hasDetail = (h.transactions||[]).length > 0 || (h.totalSpent||0) === 0;
-  showReport(d, {
-    title: 'Past cycle report',
-    periodLabel: 'Cycle: ' + h.label,
-    barLabel: 'Daily spend',
-    note: hasDetail ? null : 'Note: detailed transaction breakdown wasn\'t saved for this cycle (archived with an older version) — totals only.',
-    filename: 'budget-report-' + h.label.replace(/[^\d]+/g,'-')
-  });
-}
-
-// Year-end: aggregates every archived cycle whose archive date falls in the chosen year.
-function availableYears(){
-  const years = new Set();
-  state.history.forEach(h=>{ if(h.archivedAt) years.add(h.archivedAt.slice(0,4)); });
-  const thisYear = String(new Date().getFullYear());
-  years.add(thisYear);
-  return [...years].sort().reverse();
-}
-function openYearReport(year){
-  const entries = state.history.filter(h => (h.archivedAt||'').slice(0,4) === String(year));
-  const income = entries.reduce((s,h)=>s+Number(h.income||0),0);
-  const budget = entries.reduce((s,h)=>s+Number(h.totalBudget||0),0);
-  const savingsContrib = entries.reduce((s,h)=>s+Number(h.savingsContributed||0),0);
-
-  const allTx = [];
-  entries.forEach(h => (h.transactions||[]).forEach(t => allTx.push(t)));
-  const spent = allTx.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-  const remaining = Math.max(income - spent - savingsContrib, 0);
-  const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
-
-  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(allTx,c.id), budget:0 }))
-    .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
-
-  // Bar chart here shows spend per archived cycle across the year, not per day
-  const dailyEntries = entries.map(h=>({date:(h.archivedAt||'').slice(5,10)||h.label.slice(0,5), amount:Number(h.totalSpent||0)}));
-
-  const d = { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay:null, overBudget:[], nearLimit:[] };
-
-  showReport(d, {
-    title: 'Year-end review — ' + year,
-    periodLabel: 'Period: Year ' + year + ' (' + entries.length + ' archived cycle' + (entries.length===1?'':'s') + ')',
-    pieNote: 'whole year',
-    barLabel: 'Spend per archived cycle',
-    note: entries.length===0 ? 'No cycles archived in ' + year + ' yet.' : null,
-    filename: 'budget-year-review-' + year
-  });
-}
-
-document.getElementById('reportBtn').addEventListener('click', openReport);
-document.getElementById('reportCloseBtn').addEventListener('click', ()=>{ closeSheetEl(reportSheet); activeSheet=null; });
-document.getElementById('copyReportBtn').addEventListener('click', async ()=>{
-  const ta = document.getElementById('reportText');
-  try{ await navigator.clipboard.writeText(ta.value); showToast('Report copied'); }
-  catch(e){
-    ta.focus(); ta.select();
-    try{ document.execCommand('copy'); showToast('Report copied'); }
-    catch(e2){ showToast('Could not copy — select the text manually'); }
-  }
-});
-document.getElementById('emailReportBtn').addEventListener('click', ()=>{
-  const to = state.email || '';
-  const subject = encodeURIComponent('Budget Cockpit — ' + document.getElementById('reportTitle').textContent + ' (' + currentPeriodLabel + ')');
-  const body = encodeURIComponent(document.getElementById('reportText').value);
-  window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
-});
-let jsPdfLoading = null;
-function loadJsPdf(){
-  if(window.jspdf) return Promise.resolve();
-  if(jsPdfLoading) return jsPdfLoading;
-  jsPdfLoading = new Promise((resolve, reject)=>{
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-  return jsPdfLoading;
-}
-document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
-  try{
-    showToast('Preparing PDF…');
-    await loadJsPdf();
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const d = currentReportD;
-    const pageW = 210;
-    const marginX = 16;
-    let y = 20;
-
-    // Header
-    doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.setTextColor(20,25,40);
-    doc.text('Budget Cockpit', marginX, y);
-    doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(120);
-    doc.text(document.getElementById('reportTitle').textContent, marginX, y+7);
-    doc.setFontSize(9);
-    doc.text(currentPeriodLabel, marginX, y+13);
-    doc.setDrawColor(220); doc.line(marginX, y+18, pageW-marginX, y+18);
-    y += 28;
-
-    function sectionTitle(text){
-      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(184,128,42);
-      doc.text(text, marginX, y);
-      y += 7;
-    }
-    function labelValueRow(label, value, opts){
-      opts = opts || {};
-      doc.setFont('helvetica','normal'); doc.setFontSize(10.5); doc.setTextColor(90);
-      doc.text(label, marginX, y);
-      doc.setFont('helvetica','bold');
-      if(Array.isArray(opts.color)) doc.setTextColor(opts.color[0], opts.color[1], opts.color[2]);
-      else doc.setTextColor(opts.color || 30);
-      doc.text(String(value), pageW-marginX, y, {align:'right'});
-      y += 6.5;
-    }
-    function bodyText(text, opts){
-      opts = opts || {};
-      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(90);
-      const lines = doc.splitTextToSize(text, pageW - marginX*2 - (opts.indent||0));
-      doc.text(lines, marginX + (opts.indent||0), y);
-      y += lines.length * 4.6 + 2;
-    }
-    function ensureSpace(needed){
-      if(y + needed > 275){ doc.addPage(); y = 20; }
-    }
-
-    // Overview
-    ensureSpace(50);
-    sectionTitle('Overview');
-    labelValueRow('Total income', fmt(d.income));
-    labelValueRow('Total spent (excludes savings)', fmt(d.spent));
-    labelValueRow('Total budgeted', fmt(d.budget));
-    labelValueRow('Savings / Emergency Fund contributed', fmt(d.savingsContrib) + '  (' + d.savingsRate + '%)', {color: [63,150,130]});
-    labelValueRow('Remaining to spend', fmt(d.remaining));
-    y += 4;
-
-    // Top categories
-    ensureSpace(15 + Math.min(d.spentByCat.length,5)*7);
-    sectionTitle('Top spending categories');
-    if(d.spentByCat.length===0){
-      bodyText('No expenses logged for this period.');
-    } else {
-      d.spentByCat.slice(0,5).forEach((x,i)=>{
-        doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(40);
-        doc.text((i+1) + '.  ' + x.name, marginX, y);
-        doc.setFont('helvetica','bold');
-        doc.text(fmt(x.spent), pageW-marginX, y, {align:'right'});
-        y += 6;
-      });
-    }
-    y += 4;
-
-    // Highest day
-    if(d.highestDay){
-      ensureSpace(10);
-      sectionTitle('Highest single-day spend');
-      bodyText(d.highestDay.date + '  —  ' + fmt(d.highestDay.amount));
-      y += 2;
-    }
-
-    // Alerts
-    ensureSpace(20);
-    sectionTitle('Alerts');
-    if(d.overBudget && d.overBudget.length){
-      bodyText('Over budget: ' + d.overBudget.map(c=>c.name).join(', '));
-    } else {
-      bodyText('No categories over budget.');
-    }
-    if(d.nearLimit && d.nearLimit.length){
-      bodyText('Near limit: ' + d.nearLimit.map(c=>c.name).join(', '));
-    }
-    y += 2;
-
-    // Suggestions
-    ensureSpace(20);
-    sectionTitle('Suggestions');
-    const suggestions = [];
-    if(d.savingsRate < 20 && d.income>0) suggestions.push('Savings rate is below the commonly-cited 20% baseline — consider trimming ' + (d.spentByCat[0] ? d.spentByCat[0].name : 'your largest category') + ' next cycle.');
-    if(d.overBudget && d.overBudget.length) suggestions.push('Set a firmer cap next cycle on: ' + d.overBudget.map(c=>c.name).join(', ') + '.');
-    if((!d.overBudget || !d.overBudget.length) && (!d.nearLimit || !d.nearLimit.length) && d.savingsRate>=20) suggestions.push('Solid cycle — spending stayed within budget and savings rate met the general benchmark.');
-    if(suggestions.length===0) suggestions.push('Log a few more expenses for a more useful pattern report next cycle.');
-    suggestions.forEach(s => { bodyText('•  ' + s, {indent:2}); });
-    y += 4;
-
-    // Charts
-    ensureSpace(80);
-    sectionTitle('Charts');
-    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(120);
-    doc.text(document.getElementById('reportPieLabel').textContent, marginX, y);
-    doc.text(document.getElementById('reportBarLabel').textContent, marginX + 92, y);
-    y += 3;
-    doc.addImage(document.getElementById('reportPieCanvas').toDataURL('image/png'), 'PNG', marginX, y, 84, 63);
-    doc.addImage(document.getElementById('reportBarCanvas').toDataURL('image/png'), 'PNG', marginX + 92, y, 84, 63);
-    y += 70;
-
-    // Footer
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(160);
-    doc.text('Generated ' + new Date().toLocaleString('en-GB'), marginX, 289);
-
-    doc.save(currentReportFilename + '.pdf');
-    showToast('PDF downloaded');
-  }catch(e){
-    showToast('Could not generate PDF — try Copy instead');
-  }
-});
-
-/* ============================================================
-   CUSTOM CONFIRM MODAL
-   ============================================================ */
-const confirmBox = document.getElementById('confirmBox');
-let confirmResolver = null;
-function askConfirm(title, msg){
-  document.getElementById('confirmTitle').textContent = title;
-  document.getElementById('confirmMsg').textContent = msg;
-  overlay.classList.add('show'); confirmBox.classList.add('show');
-  return new Promise(resolve => { confirmResolver = resolve; });
-}
-document.getElementById('confirmOkBtn').addEventListener('click', ()=>{
-  confirmBox.classList.remove('show'); overlay.classList.remove('show');
-  if(confirmResolver) confirmResolver(true); confirmResolver = null;
-});
-document.getElementById('confirmCancelBtn').addEventListener('click', ()=>{
-  confirmBox.classList.remove('show'); overlay.classList.remove('show');
-  if(confirmResolver) confirmResolver(false); confirmResolver = null;
-});
-
-/* ============================================================
-   ARCHIVE / ROLLOVER
-   ============================================================ */
-document.getElementById('archiveBtn').addEventListener('click', async ()=>{
-  const ok = await askConfirm('Archive this cycle?',
-    'This saves ' + cycleLabelText() + ' to History, folds savings contributions into your lifetime totals, and clears transactions + extra income. Category budgets and goals stay the same.');
-  if(!ok) return;
-
-  const closedLabel = cycleLabelText();
-  const d = buildReportData();
-  state.history.push({
-    label: closedLabel,
-    income: d.income, totalBudget: d.budget, totalSpent: d.spent, savingsContributed: d.savingsContrib,
-    archivedAt: toDateInput(new Date()),
-    transactions: JSON.parse(JSON.stringify(state.transactions)),
-    extraIncome: JSON.parse(JSON.stringify(state.extraIncome))
-  });
-
-  savingsCategories().forEach(c=>{
-    const contributed = spentFor(c.id);
-    state.savingsAccumulated[c.id] = (state.savingsAccumulated[c.id]||0) + contributed;
-  });
-
-  state.transactions = [];
-  state.extraIncome = [];
-
-  saveState(); renderAll();
-
-  if(d.overBudget.length===0 && d.income>0 && d.savingsRate>=20){
-    celebrate();
-    showToast('🎉 Great cycle — under budget and ' + d.savingsRate + '% saved!');
-  } else {
-    showToast('Cycle archived — fresh start!');
-  }
-
-  showReport(d, {
-    title: 'Cycle report',
-    periodLabel: 'Cycle: ' + closedLabel,
-    barLabel: 'Daily spend',
-    filename: 'budget-report-' + closedLabel.replace(/[^\d]+/g,'-')
-  });
-});
-
-/* ============================================================
-   INIT
-   ============================================================ */
-loadState();
-
-/* ============================================================
-   PWA — register service worker (safe no-op if hosted somewhere
-   that can't serve sw.js, e.g. this preview inside Claude)
-   ============================================================ */
-if('serviceWorker' in navigator && location.protocol !== 'about:'){
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {
-      // No service worker available here (e.g. previewing inside Claude,
-      // or opened as a local file) — app still works fully online.
-    });
-  });
-}
-</script>
+<script src="app.js" defer></script>
 </body>
 </html>
