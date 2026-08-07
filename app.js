@@ -112,10 +112,14 @@ let state = {
 };
 
 const CURRENCY_OPTIONS = [
-  {sym:'₦', label:'₦ Naira'}, {sym:'$', label:'$ Dollar'}, {sym:'£', label:'£ Pound'},
-  {sym:'€', label:'€ Euro'}, {sym:'R', label:'R Rand'}, {sym:'₵', label:'₵ Cedi'},
-  {sym:'KSh', label:'KSh Kenyan Shilling'}, {sym:'₹', label:'₹ Rupee'}
+  {sym:'₦', code:'NGN', label:'₦ Naira'}, {sym:'$', code:'USD', label:'$ Dollar'}, {sym:'£', code:'GBP', label:'£ Pound'},
+  {sym:'€', code:'EUR', label:'€ Euro'}, {sym:'R', code:'ZAR', label:'R Rand'}, {sym:'₵', code:'GHS', label:'₵ Cedi'},
+  {sym:'KSh', code:'KES', label:'KSh Kenyan Shilling'}, {sym:'₹', code:'INR', label:'₹ Rupee'}
 ];
+function currencyCodeFor(sym){
+  const c = CURRENCY_OPTIONS.find(x=>x.sym===sym);
+  return c ? c.code : 'NGN';
+}
 
 /* ============================================================
    BACKEND CONFIG
@@ -225,6 +229,7 @@ async function loadState(){
   updateSyncIndicator();
   loadQuote();
   startClock();
+  hideLoadingScreen();
 
   if(isDirty) trySyncNow(); // push anything queued from an earlier offline session
 }
@@ -351,6 +356,17 @@ function showToast(msg){
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2400);
+}
+// Updates an element's text and gives it a brief gold flash — but only
+// when the value actually changed, so it never flashes on every render.
+function setTextFlash(id, newText){
+  const el = document.getElementById(id);
+  if(!el) return;
+  if(el.textContent === newText) return;
+  el.textContent = newText;
+  el.classList.remove('value-flash');
+  void el.offsetWidth; // restart the animation
+  el.classList.add('value-flash');
 }
 function celebrate(){
   const emojis = ['🎉','✨','💰','🏆','⭐'];
@@ -501,9 +517,9 @@ function renderDashboard(){
   const budget = totalBudget();
 
   document.getElementById('cycleLabel').textContent = cycleLabelText();
-  document.getElementById('statIncome').textContent = fmt(income);
-  document.getElementById('statSpent').textContent = fmt(spent);
-  document.getElementById('statRemaining').textContent = fmt(remaining);
+  setTextFlash('statIncome', fmt(income));
+  setTextFlash('statSpent', fmt(spent));
+  setTextFlash('statRemaining', fmt(remaining));
 
   const compareEl = document.getElementById('spentCompare');
   const lastCycle = state.history[state.history.length-1];
@@ -673,14 +689,17 @@ function renderExtraIncome(){
   sorted.forEach(e=>{
     const row = document.createElement('div');
     row.className = 'extra-row';
+    const fxNote = e.fxOriginalCurrency
+      ? `${escapeHtml(e.fxOriginalCurrency)}${e.fxOriginalAmount} converted @ ${Number(e.fxRate).toFixed(2)} (${escapeHtml(e.fxRateDate||'')})`
+      : e.date;
     row.innerHTML = `
       <div class="extra-left">
         <div class="src">${escapeHtml(e.source)||'Extra income'}</div>
-        <div class="dt">${e.date}</div>
+        <div class="dt">${fxNote}</div>
       </div>
       <div class="extra-right">
         <div class="extra-amt">+${fmt(e.amount)}</div>
-        <button class="tx-del" data-id="${e.id}">✕</button>
+        <button class="tx-del" data-id="${e.id}" aria-label="Delete">✕</button>
       </div>`;
     wrap.appendChild(row);
     row.querySelector('.tx-del').addEventListener('click', ()=>{
@@ -753,7 +772,7 @@ function renderTxRow(container, t, showDelete){
           <div class="tx-amt">${fmt(t.amount)}</div>
           <div class="tx-date">${t.date}</div>
         </div>
-        ${showDelete ? `<button class="tx-del" data-id="${t.id}">✕</button>` : ''}
+        ${showDelete ? `<button class="tx-del" data-id="${t.id}" aria-label="Delete">✕</button>` : ''}
       </div>
     </div>
   `;
@@ -911,7 +930,7 @@ function renderDebtTab(){
         <div class="debt-actions">
           ${rem>0 ? `<button class="debt-btn-pay" data-pay="${debt.id}">Log payment</button>` : ''}
           ${state.debtStrategy==='manual' && rem>0 ? `<button class="debt-btn-focus" data-focus="${debt.id}">${isFocused?'Focused':'Set as focus'}</button>` : ''}
-          <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}">🗑</button>
+          <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Delete debt">🗑</button>
         </div>
       `;
       listWrap.appendChild(div);
@@ -1113,7 +1132,7 @@ function renderSettings(){
     div.innerHTML = `
       <div class="settings-cat-name" style="display:flex;justify-content:space-between;align-items:center;">
         <span>${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></span>
-        <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category"
+        <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category" aria-label="Delete category"
           style="background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px;">🗑</button>
       </div>
       <div class="settings-row">
@@ -1183,7 +1202,7 @@ function renderBillsList(){
         <div class="src">${escapeHtml(bill.name)}</div>
         <div class="dt">Due day ${bill.dueDay} · ${fmt(bill.amount)}</div>
       </div>
-      <button class="tx-del" data-id="${bill.id}">✕</button>
+      <button class="tx-del" data-id="${bill.id}" aria-label="Delete bill">✕</button>
     `;
     row.querySelector('.tx-del').addEventListener('click', ()=>{
       state.bills = state.bills.filter(b=>b.id!==bill.id);
@@ -1344,21 +1363,95 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
 });
 
 const extraSheet = document.getElementById('extraSheet');
+let lastFxQuote = null; // {rate, from, to, date} — cached result of the most recent live rate check
+
+function populateExtraCurrency(){
+  const sel = document.getElementById('extraCurrency');
+  if(!sel.options.length){
+    sel.innerHTML = CURRENCY_OPTIONS.map(c=>`<option value="${c.sym}">${escapeHtml(c.label)}</option>`).join('');
+  }
+  sel.value = state.currency || '₦';
+}
 document.getElementById('addExtraBtn').addEventListener('click', ()=>{
   document.getElementById('extraDate').value = toDateInput(new Date());
+  populateExtraCurrency();
+  document.getElementById('fxPreview').style.display = 'none';
+  lastFxQuote = null;
   activeSheet = extraSheet; openSheetEl(extraSheet);
 });
 document.getElementById('extraCancelBtn').addEventListener('click', ()=>{ closeSheetEl(extraSheet); activeSheet=null; });
-document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
+
+let fxCheckTimer = null;
+async function checkFxRate(){
+  const previewEl = document.getElementById('fxPreview');
   const amount = Number(document.getElementById('extraAmount').value);
+  const fromSym = document.getElementById('extraCurrency').value;
+  const homeSym = state.currency || '₦';
+
+  if(fromSym === homeSym || !amount || amount<=0){
+    previewEl.style.display = 'none';
+    lastFxQuote = null;
+    return;
+  }
+
+  const fromCode = currencyCodeFor(fromSym);
+  const toCode = currencyCodeFor(homeSym);
+  previewEl.style.display = 'block';
+  previewEl.className = 'fx-preview loading';
+  previewEl.textContent = 'Checking live exchange rate…';
+
+  try{
+    const res = await fetch(`https://api.frankfurter.app/latest?amount=${amount}&from=${fromCode}&to=${toCode}`);
+    const data = await res.json();
+    const converted = data.rates && data.rates[toCode];
+    if(!converted) throw new Error('no rate');
+    const rate = converted / amount;
+    lastFxQuote = { rate, from: fromCode, to: toCode, date: data.date };
+    previewEl.className = 'fx-preview';
+    previewEl.textContent = `≈ ${fmt(converted)} at today's rate (1 ${fromCode} = ${rate.toFixed(2)} ${toCode}, ${data.date})`;
+  }catch(e){
+    lastFxQuote = null;
+    previewEl.className = 'fx-preview error';
+    previewEl.textContent = 'Could not fetch a live rate — enter the amount in ' + homeSym + ' instead, or try again.';
+  }
+}
+document.getElementById('extraAmount').addEventListener('input', ()=>{
+  clearTimeout(fxCheckTimer);
+  fxCheckTimer = setTimeout(checkFxRate, 500);
+});
+document.getElementById('extraCurrency').addEventListener('change', checkFxRate);
+
+document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
+  const rawAmount = Number(document.getElementById('extraAmount').value);
+  const fromSym = document.getElementById('extraCurrency').value;
+  const homeSym = state.currency || '₦';
   const source = document.getElementById('extraSource').value.trim();
   const date = document.getElementById('extraDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  state.extraIncome.push({id: Date.now(), amount, source, date});
+  if(!rawAmount || rawAmount<=0){ showToast('Enter a valid amount'); return; }
+
+  const entry = { id: Date.now(), source, date };
+  if(fromSym !== homeSym){
+    if(!lastFxQuote || lastFxQuote.from !== currencyCodeFor(fromSym)){
+      showToast('Still checking the exchange rate — wait a second and try again');
+      return;
+    }
+    entry.amount = Math.round(rawAmount * lastFxQuote.rate);
+    entry.fxOriginalAmount = rawAmount;
+    entry.fxOriginalCurrency = fromSym;
+    entry.fxRate = lastFxQuote.rate;
+    entry.fxRateDate = lastFxQuote.date;
+  } else {
+    entry.amount = rawAmount;
+  }
+
+  state.extraIncome.push(entry);
   saveState(); renderAll();
   closeSheetEl(extraSheet); activeSheet=null;
   document.getElementById('extraAmount').value=''; document.getElementById('extraSource').value='';
-  showToast('Extra income added — buffered into your totals');
+  document.getElementById('fxPreview').style.display = 'none';
+  showToast(entry.fxOriginalCurrency
+    ? `Converted ${entry.fxOriginalCurrency}${entry.fxOriginalAmount} → ${fmt(entry.amount)} and added`
+    : 'Extra income added — buffered into your totals');
 });
 
 /* ============================================================
@@ -1610,6 +1703,23 @@ function openWhatIf(){
   activeSheet = whatIfSheet; openSheetEl(whatIfSheet);
 }
 document.getElementById('whatIfBtn').addEventListener('click', openWhatIf);
+
+/* Insights accordion (quote + weekday pattern) — collapsed by default, remembered per device */
+(function initInsightsToggle(){
+  const toggleBtn = document.getElementById('insightsToggle');
+  const body = document.getElementById('insightsBody');
+  if(!toggleBtn || !body) return;
+  const STORAGE_KEY = 'insightsOpen';
+  const isOpen = localStorage.getItem(STORAGE_KEY) === '1';
+  toggleBtn.classList.toggle('open', isOpen);
+  body.classList.toggle('open', isOpen);
+  toggleBtn.addEventListener('click', () => {
+    const nowOpen = !body.classList.contains('open');
+    toggleBtn.classList.toggle('open', nowOpen);
+    body.classList.toggle('open', nowOpen);
+    localStorage.setItem(STORAGE_KEY, nowOpen ? '1' : '0');
+  });
+})();
 document.getElementById('whatIfCloseBtn').addEventListener('click', ()=>{ closeSheetEl(whatIfSheet); activeSheet=null; });
 document.getElementById('whatIfCategory').addEventListener('change', updateWhatIf);
 document.getElementById('whatIfSlider').addEventListener('input', (e)=>{
@@ -1779,8 +1889,12 @@ function loadJsPdf(){
   jsPdfLoading = new Promise((resolve, reject)=>{
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
+    // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
+    s.integrity = 'sha384-REPLACE_WITH_HASH_FROM_SRIHASH_ORG';
+    s.crossOrigin = 'anonymous';
     s.onload = resolve;
-    s.onerror = reject;
+    s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
     document.head.appendChild(s);
   });
   return jsPdfLoading;
@@ -1979,6 +2093,7 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
    LOCK SCREEN / LOGIN
    ============================================================ */
 function showLockScreen(msg){
+  hideLoadingScreen();
   document.getElementById('lockScreen').style.display = 'flex';
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
@@ -1986,6 +2101,10 @@ function showLockScreen(msg){
 }
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
+}
+function hideLoadingScreen(){
+  const el = document.getElementById('loadingScreen');
+  if(el) el.style.display = 'none';
 }
 async function doLogin(){
   const pw = document.getElementById('lockPasswordInput').value;
@@ -2033,7 +2152,7 @@ async function renderSharesList(){
           <div class="src">${escapeHtml(s.periodLabel||'Report')}</div>
           <div class="dt">Expires ${new Date(s.expiresAt).toLocaleDateString('en-GB')}</div>
         </div>
-        <button class="tx-del" data-token="${s.token}">✕</button>
+        <button class="tx-del" data-token="${s.token}" aria-label="Revoke link">✕</button>
       `;
       row.querySelector('.tx-del').addEventListener('click', async ()=>{
         await apiPost('revokeShare', {shareToken: s.token});
