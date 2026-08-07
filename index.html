@@ -15,7 +15,7 @@
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src https://fonts.gstatic.com;
   img-src 'self' data:;
-  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io;
+  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.app;
   object-src 'none';
   base-uri 'self';
   frame-ancestors 'self';
@@ -94,6 +94,11 @@ body{min-height:100vh; padding-bottom:92px;}
 .pace-behind{background:rgba(255,107,107,.15);color:var(--red);}
 .gauge-stat{font-size:12px;color:var(--muted);margin-bottom:3px;}
 .gauge-stat b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
+.value-flash{animation:valueFlash .6s ease;}
+@keyframes valueFlash{
+  0%{ color:var(--gold); transform:scale(1.08); display:inline-block; }
+  100%{ color:inherit; transform:scale(1); }
+}
 
 /* Budget check banner */
 /* Payday card */
@@ -107,12 +112,20 @@ body{min-height:100vh; padding-bottom:92px;}
 .payday-countdown{margin-top:10px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:13px;
   color:var(--gold);font-weight:700;letter-spacing:.02em;padding-top:10px;border-top:1px solid var(--line);}
 
-.budget-check{margin:10px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
-  display:flex;justify-content:space-between;align-items:center;font-size:12px;}
-.budget-check.over{border-color:var(--red);background:rgba(255,107,107,.08);}
-.budget-check .lbl{color:var(--muted);}
-.budget-check .val{font-family:'JetBrains Mono',monospace;font-weight:700;}
+.budget-check{font-size:12px;color:var(--muted);}
+.budget-check .val{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
 .budget-check.over .val{color:var(--red);}
+
+/* Insights accordion (quote + weekday chart) */
+.insights-toggle{margin:14px 20px 0;width:calc(100% - 40px);display:flex;align-items:center;justify-content:space-between;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:12px;
+  font-weight:600;color:var(--text);cursor:pointer;font-family:inherit;}
+.insights-toggle span:first-child{display:flex;align-items:center;gap:6px;}
+.insights-chevron{color:var(--muted);transition:transform .2s ease;font-size:11px;}
+.insights-toggle.open .insights-chevron{transform:rotate(180deg);}
+.insights-body{display:none;}
+.insights-body.open{display:block;}
+.insights-body .quote-card,.insights-body .mini-card{margin-top:10px;}
 
 /* Safe-to-spend strip */
 .sts{margin:14px 20px 0;display:flex;background:var(--panel);border:1px solid var(--line);
@@ -166,6 +179,10 @@ body{min-height:100vh; padding-bottom:92px;}
 .share-result input{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;
   color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 10px;margin-bottom:8px;}
 .share-result-note{font-size:10.5px;color:var(--muted);line-height:1.4;}
+.fx-preview{background:rgba(63,199,176,.08);border:1px solid rgba(63,199,176,.3);border-radius:10px;
+  padding:10px 13px;margin:-6px 0 14px;font-size:12px;color:var(--teal);line-height:1.5;}
+.fx-preview.loading{color:var(--muted);border-color:var(--line);background:var(--panel-2);}
+.fx-preview.error{color:var(--red);border-color:rgba(255,107,107,.3);background:rgba(255,107,107,.06);}
 
 /* Section headers */
 .section{margin:26px 20px 10px;display:flex;align-items:center;justify-content:space-between;}
@@ -174,7 +191,8 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Category cards */
 .cat-list{margin:0 20px;display:flex;flex-direction:column;gap:10px;}
-.cat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;}
+.cat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;transition:transform .12s ease;}
+.cat:active{transform:scale(.985);}
 .cat-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;}
 .cat-name{font-size:13px;font-weight:600;}
 .cat-group{font-size:9px;color:var(--muted-2);text-transform:uppercase;letter-spacing:.06em;}
@@ -290,9 +308,12 @@ body{min-height:100vh; padding-bottom:92px;}
   border-top:1px solid var(--line);z-index:20;}
 .nav-inner{max-width:480px;margin:0 auto;display:flex;padding:8px 2px calc(env(safe-area-inset-bottom) + 8px);}
 .nav-btn{flex:1;background:none;border:none;color:var(--muted);font-family:'Inter',sans-serif;
-  font-size:9px;padding:8px 1px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;}
-.nav-btn .ic{font-size:16px;}
+  font-size:9px;padding:8px 1px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
+  transition:color .15s ease;}
+.nav-btn .ic{font-size:16px;transition:transform .15s ease;}
 .nav-btn.active{color:var(--gold);}
+.nav-btn.active .ic{transform:scale(1.15);}
+.nav-btn:active .ic{transform:scale(.9);}
 
 /* FAB */
 .fab{position:fixed;bottom:78px;right:calc(50% - 240px + 20px);width:56px;height:56px;border-radius:50%;
@@ -363,7 +384,8 @@ body{min-height:100vh; padding-bottom:92px;}
 .field input:focus, .field select:focus, .field textarea:focus{outline:none;border-color:var(--gold);}
 .amt-input{font-family:'JetBrains Mono',monospace !important;font-size:20px !important;font-weight:700;}
 .btn{width:100%;padding:14px;border-radius:12px;border:none;font-family:'Inter',sans-serif;font-weight:600;
-  font-size:14px;cursor:pointer;}
+  font-size:14px;cursor:pointer;transition:transform .12s ease;}
+.btn:active{transform:scale(.97);}
 .btn-primary{background:linear-gradient(135deg,var(--gold),#c98f2e);color:#1a1200;}
 .btn-teal{background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;}
 .btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--line);margin-top:8px;}
@@ -386,7 +408,11 @@ body{min-height:100vh; padding-bottom:92px;}
 .budget-total-line .v{font-family:'JetBrains Mono',monospace;font-weight:700;}
 
 .view{display:none;}
-.view.active{display:block;}
+.view.active{display:block; animation:viewFadeIn .25s ease;}
+@keyframes viewFadeIn{
+  from{ opacity:0; transform:translateY(6px); }
+  to{ opacity:1; transform:translateY(0); }
+}
 .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line);
   color:var(--text);font-size:12px;padding:10px 16px;border-radius:20px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none;
   max-width:80%;text-align:center;}
@@ -416,6 +442,14 @@ body{min-height:100vh; padding-bottom:92px;}
   color:var(--text);font-family:'Inter',sans-serif;font-size:16px;padding:14px 16px;text-align:center;}
 .lock-input:focus{outline:none;border-color:var(--gold);}
 .lock-error{margin-top:12px;font-size:12px;color:var(--red);min-height:16px;}
+
+/* Loading screen */
+.loading-screen{position:fixed;inset:0;z-index:99;background:var(--bg);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;}
+.loading-spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--line);
+  border-top-color:var(--gold);animation:spin .8s linear infinite;}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.loading-text{font-size:12.5px;color:var(--muted);}
 /* Hover states — desktop/web only, never affects touch devices */
 @media (hover:hover) and (pointer:fine){
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
@@ -449,6 +483,11 @@ body{min-height:100vh; padding-bottom:92px;}
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Unlock</button>
     <div class="lock-error" id="lockError"></div>
   </div>
+</div>
+
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Loading your budget…</div>
 </div>
 
 
@@ -485,6 +524,7 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="gauge-stat">Income <b id="statIncome">—</b></div>
         <div class="gauge-stat">Spent <b id="statSpent">—</b> <span id="spentCompare" style="font-size:10px;"></span></div>
         <div class="gauge-stat">Remaining to spend <b id="statRemaining">—</b></div>
+        <div class="gauge-stat budget-check" id="budgetCheck">Budgeted (+savings) <span class="val" id="budgetCheckVal">—</span></div>
       </div>
     </div>
 
@@ -506,11 +546,6 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="badge-row" id="badgeRow" style="display:none;"></div>
     <div class="bill-reminders" id="billReminders" style="display:none;"></div>
 
-    <div class="budget-check" id="budgetCheck">
-      <span class="lbl">Total budgeted (all categories)</span>
-      <span class="val" id="budgetCheckVal">—</span>
-    </div>
-
     <div class="sts">
       <div class="sts-item">
         <div class="sts-val" id="daysLeft">—</div>
@@ -527,23 +562,29 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
-    <div class="quote-card">
-      <div class="quote-mark">"</div>
-      <div class="quote-eyebrow">
-        <span>✦ Money thought for today</span>
-        <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
-      </div>
-      <div class="quote-text" id="quoteText">Loading…</div>
-      <div class="quote-author" id="quoteAuthor"></div>
-    </div>
-
-    <div class="mini-card">
-      <div class="mini-card-title">Weekday pattern</div>
-      <canvas id="weekdayCanvas" width="280" height="90"></canvas>
-      <div class="mini-card-note" id="weekdayHighest">—</div>
-    </div>
-
     <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
+
+    <button class="insights-toggle" id="insightsToggle" type="button">
+      <span>✦ Insights <span style="color:var(--muted);font-weight:400;margin-left:4px;">quote &amp; weekday pattern</span></span>
+      <span class="insights-chevron" id="insightsChevron">▾</span>
+    </button>
+    <div class="insights-body" id="insightsBody">
+      <div class="quote-card">
+        <div class="quote-mark">"</div>
+        <div class="quote-eyebrow">
+          <span>✦ Money thought for today</span>
+          <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
+        </div>
+        <div class="quote-text" id="quoteText">Loading…</div>
+        <div class="quote-author" id="quoteAuthor"></div>
+      </div>
+
+      <div class="mini-card">
+        <div class="mini-card-title">Weekday pattern</div>
+        <canvas id="weekdayCanvas" width="280" height="90"></canvas>
+        <div class="mini-card-note" id="weekdayHighest">—</div>
+      </div>
+    </div>
 
     <div class="section"><h2>Extra income this cycle</h2><span class="tag" id="extraTag">₦0 added</span></div>
     <div class="extra-list" id="extraList"></div>
@@ -664,6 +705,8 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="faq-a">Tap any transaction row to edit it — the amount, category, method, description, and date can all be changed, and Save updates it in place instead of creating a duplicate. On mobile you can also swipe a row left to reveal quick Edit and Delete buttons. The ✕ button next to a transaction deletes it directly.</div></div>
       <div class="faq-item"><div class="faq-q">What are payment methods for, and do I have to use them?</div>
         <div class="faq-a">Optional. Tagging an expense as Cash, Card, USSD, Mobile Wallet, or Bank Transfer doesn't change any calculations — it's just there so your transaction list (and any export) shows how money left your account, useful for spotting patterns like "I overspend when paying by card."</div></div>
+      <div class="faq-item"><div class="faq-q">I received income in a different currency (e.g. dollars) — how does that get added to my Naira total?</div>
+        <div class="faq-a">When logging Extra Income, pick the currency you actually received it in. The app fetches a live exchange rate at that moment (via the Frankfurter rate API, which sources European Central Bank reference rates) and converts it to your home currency automatically — you'll see a preview like "$50 ≈ ₦77,500 at today's rate" before saving. The original amount, currency, the exact rate used, and the date are all kept on the entry so you can see exactly how it was converted later. Only your home-currency total ever counts toward your budget — nothing is double-counted.</div></div>
       <div class="faq-item"><div class="faq-q">How do I add or remove a category?</div>
         <div class="faq-a">In Settings, scroll to "Add a new category" — give it a name and a group (Needs/Wants/Savings). To remove one, tap the 🗑 next to it in the category list. If it still has spending logged this cycle, you'll be warned first; the transactions themselves aren't deleted, they just show as "Uncategorized."</div></div>
       <div class="faq-item"><div class="faq-q">What's the difference between the Debt tracker and the "Debt repayment" category?</div>
@@ -860,7 +903,7 @@ body{min-height:100vh; padding-bottom:92px;}
 
 </div>
 
-<button class="fab" id="fabAdd">+</button>
+<button class="fab" id="fabAdd" aria-label="Log an expense">+</button>
 <button class="ai-fab" id="askAiFab" aria-label="AI assistant">
   <span class="ai-fab-icon">✦</span>
 </button>
@@ -881,7 +924,7 @@ body{min-height:100vh; padding-bottom:92px;}
   <div class="sheet-handle"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <h3 id="addSheetTitle" style="margin:0;">Log an expense</h3>
-    <button class="voice-btn" id="voiceLogBtn" title="Speak your expense">🎙️</button>
+    <button class="voice-btn" id="voiceLogBtn" title="Speak your expense" aria-label="Speak your expense">🎙️</button>
   </div>
   <div class="voice-status" id="voiceStatus" style="display:none;"></div>
   <div class="field">
@@ -920,9 +963,14 @@ body{min-height:100vh; padding-bottom:92px;}
   <div class="sheet-handle"></div>
   <h3>Add extra income</h3>
   <div class="field">
-    <label>Amount (₦)</label>
+    <label>Amount</label>
     <input type="number" id="extraAmount" class="amt-input" inputmode="decimal" placeholder="0" min="0" step="1">
   </div>
+  <div class="field">
+    <label>Currency received in</label>
+    <select id="extraCurrency"></select>
+  </div>
+  <div class="fx-preview" id="fxPreview" style="display:none;"></div>
   <div class="field">
     <label>Source</label>
     <input type="text" id="extraSource" placeholder="e.g. Freelance gig, gift, refund">
@@ -1017,7 +1065,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <h3 style="margin:0;">AI assistant</h3>
       <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">Based on this cycle's numbers — not financial advice</p>
     </div>
-    <button class="ai-clear-btn" id="aiClearBtn" title="Clear conversation">🗑</button>
+    <button class="ai-clear-btn" id="aiClearBtn" title="Clear conversation" aria-label="Clear conversation">🗑</button>
   </div>
   <div class="ai-chat" id="aiChat"></div>
   <div class="ai-input-row">
