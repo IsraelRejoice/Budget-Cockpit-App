@@ -1891,7 +1891,7 @@ function loadJsPdf(){
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
     // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
-    s.integrity = 'sha384-REPLACE_WITH_HASH_FROM_SRIHASH_ORG';
+    s.integrity = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
     s.crossOrigin = 'anonymous';
     s.onload = resolve;
     s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
