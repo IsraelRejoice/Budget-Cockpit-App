@@ -1,4 +1,3 @@
-
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -217,6 +216,7 @@ async function loadState(){
   if(state.debtFocusId == null) state.debtFocusId = '';
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
+  if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
   if(!state.currency) state.currency = '₦';
   if(!state.bills) state.bills = [];
   if(!state.shares) state.shares = [];
@@ -254,7 +254,18 @@ function saveState(){
     if(!navigator.onLine){ return; } // stay queued — the 'online' listener retries automatically
     try{
       const data = await apiPost('saveState', {state});
-      if(data && !data.error){ isDirty = false; saveLocalMirror(); updateSyncIndicator(); }
+      if(data && !data.error){
+        isDirty = false;
+        if(data.conflictResolved && data.state){
+          // The backend auto-archived a cycle while this device was offline
+          // and had to filter our stale transactions out to protect History.
+          // Adopt its authoritative post-merge state instead of drifting.
+          state = Object.assign(state, data.state);
+          renderAll();
+          showToast('A cycle auto-archived while you were offline — synced up');
+        }
+        saveLocalMirror(); updateSyncIndicator();
+      }
     }catch(e){
       // still offline/unreachable — stays queued, no error shown (this is expected while offline)
     }
@@ -269,7 +280,13 @@ function trySyncNow(){
   apiPost('saveState', {state}).then(data=>{
     if(data && !data.error){
       isDirty = false; saveLocalMirror(); updateSyncIndicator();
-      showToast('Back online — synced ✓');
+      if(data.conflictResolved && data.state){
+        state = Object.assign(state, data.state);
+        renderAll();
+        showToast('A cycle auto-archived while you were offline — synced up');
+      } else {
+        showToast('Back online — synced ✓');
+      }
     }
   }).catch(()=>{});
 }
@@ -1083,11 +1100,36 @@ function renderPastCycles(){
         <div class="tx-cat">${escapeHtml(h.label)}</div>
         <div class="tx-desc">Income ${fmt(h.income)} · Spent ${fmt(h.totalSpent)}</div>
       </div>
-      <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
+      <button class="btn btn-ghost view-btn" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
+      <button class="btn btn-ghost restore-btn" style="width:auto;padding:8px 14px;margin:0 0 0 6px;font-size:12px;">Restore</button>
     `;
-    row.querySelector('button').addEventListener('click', ()=> openReportForHistory(h));
+    row.querySelector('.view-btn').addEventListener('click', ()=> openReportForHistory(h));
+    row.querySelector('.restore-btn').addEventListener('click', ()=> restoreCycleFromHistory(h));
     wrap.appendChild(row);
   });
+}
+
+async function restoreCycleFromHistory(h){
+  if(!API_URL){ showToast('Restore needs a live backend connection'); return; }
+  if(!navigator.onLine){ showToast('You\'re offline — reconnect to restore a cycle'); return; }
+  const ok = await askConfirm('Restore "' + h.label + '"?',
+    'This brings its transactions and extra income back into your current cycle and removes it from History. Use this if it archived by mistake.');
+  if(!ok) return;
+  try{
+    const data = await apiPost('restoreCycle', {label: h.label});
+    if(!data || data.error){ showToast('Could not restore: ' + (data && data.error || 'unknown error')); return; }
+    const fresh = await apiGet('getState');
+    if(fresh && !fresh.error){
+      state = Object.assign(state, fresh);
+      isDirty = false;
+      saveLocalMirror();
+      renderAll();
+      updateSyncIndicator();
+    }
+    showToast('Cycle restored — ' + data.restoredTransactions + ' transaction(s) back');
+  }catch(e){
+    showToast('Could not reach backend to restore');
+  }
 }
 
 function renderYearSelect(){
@@ -1891,7 +1933,7 @@ function loadJsPdf(){
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
     // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
-    s.integrity = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
+    s.integrity = 'sha384-REPLACE_WITH_HASH_FROM_SRIHASH_ORG';
     s.crossOrigin = 'anonymous';
     s.onload = resolve;
     s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
