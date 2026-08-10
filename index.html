@@ -15,7 +15,7 @@
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src https://fonts.gstatic.com;
   img-src 'self' data:;
-  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.app;
+  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.dev;
   object-src 'none';
   base-uri 'self';
   frame-ancestors 'self';
@@ -78,6 +78,32 @@ body{min-height:100vh; padding-bottom:92px;}
 .clock{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;}
 .clock-style-btn{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 4px;line-height:1;border-radius:6px;}
 .clock-style-btn:hover{color:var(--text);background:var(--panel);}
+
+/* Analog clock face themes — default (classic) uses the same palette as the
+   rest of the UI, so it already adapts to light/dark automatically. */
+#analogClockFace .clk-face{stroke:var(--line);}
+#analogClockFace .clk-center{fill:var(--text);}
+#analogClockFace #clockHandHour{stroke:var(--text);}
+#analogClockFace #clockHandMinute{stroke:var(--text);}
+#analogClockFace #clockHandSecond{stroke:var(--teal);}
+
+#analogClockFace.theme-amber .clk-face{stroke:var(--amber);}
+#analogClockFace.theme-amber .clk-center{fill:var(--amber);}
+#analogClockFace.theme-amber #clockHandHour{stroke:var(--amber);}
+#analogClockFace.theme-amber #clockHandMinute{stroke:var(--amber);}
+#analogClockFace.theme-amber #clockHandSecond{stroke:var(--red);}
+
+#analogClockFace.theme-teal .clk-face{stroke:var(--teal);}
+#analogClockFace.theme-teal .clk-center{fill:var(--teal);}
+#analogClockFace.theme-teal #clockHandHour{stroke:var(--teal);}
+#analogClockFace.theme-teal #clockHandMinute{stroke:var(--teal);}
+#analogClockFace.theme-teal #clockHandSecond{stroke:var(--amber);}
+
+#analogClockFace.theme-mono .clk-face{stroke:var(--muted);}
+#analogClockFace.theme-mono .clk-center{fill:var(--muted);}
+#analogClockFace.theme-mono #clockHandHour{stroke:var(--muted);}
+#analogClockFace.theme-mono #clockHandMinute{stroke:var(--muted);}
+#analogClockFace.theme-mono #clockHandSecond{stroke:var(--muted);}
 .theme-toggle{background:var(--panel);border:1px solid var(--line);border-radius:20px;width:40px;height:40px;
   display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;color:var(--text);flex:none;}
 
@@ -504,13 +530,14 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="clock-row" style="display:flex;align-items:center;gap:8px;margin-top:6px;">
           <div class="clock" id="liveClock" style="margin-top:0;">—</div>
           <svg id="analogClockFace" viewBox="0 0 40 40" style="display:none;flex-shrink:0;" aria-label="Analog clock">
-            <circle cx="20" cy="20" r="18" fill="none" stroke="var(--line)" stroke-width="1.5"/>
-            <circle cx="20" cy="20" r="1.6" fill="var(--text)"/>
-            <line id="clockHandHour" x1="20" y1="20" x2="20" y2="11" stroke="var(--text)" stroke-width="2" stroke-linecap="round"/>
-            <line id="clockHandMinute" x1="20" y1="20" x2="20" y2="7" stroke="var(--text)" stroke-width="1.5" stroke-linecap="round"/>
-            <line id="clockHandSecond" x1="20" y1="20" x2="20" y2="6" stroke="var(--teal)" stroke-width="1"/>
+            <circle class="clk-face" cx="20" cy="20" r="18" fill="none" stroke-width="1.5"/>
+            <circle class="clk-center" cx="20" cy="20" r="1.6"/>
+            <line id="clockHandHour" x1="20" y1="20" x2="20" y2="11" stroke-width="2" stroke-linecap="round"/>
+            <line id="clockHandMinute" x1="20" y1="20" x2="20" y2="7" stroke-width="1.5" stroke-linecap="round"/>
+            <line id="clockHandSecond" x1="20" y1="20" x2="20" y2="6" stroke-width="1"/>
           </svg>
           <button class="clock-style-btn" id="clockStyleBtn" type="button" aria-label="Switch clock style" title="Switch between digital and analog clock">🕐</button>
+          <button class="clock-style-btn" id="clockThemeBtn" type="button" aria-label="Change clock theme" title="Change clock face theme" style="display:none;">🎨</button>
         </div>
         <div class="clock" id="syncIndicator" style="margin-top:2px;">● Synced</div>
       </div>
