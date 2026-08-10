@@ -450,19 +450,41 @@ function updatePaydayCard(){
 }
 let clockStyle = 'digital';
 try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
+const CLOCK_THEMES = ['classic','amber','teal','mono'];
+let clockTheme = 'classic';
+try{ clockTheme = localStorage.getItem('clockTheme') || 'classic'; }catch(e){}
+
+function applyClockThemeUI(){
+  const analog = document.getElementById('analogClockFace');
+  if(!analog) return;
+  CLOCK_THEMES.forEach(t => analog.classList.remove('theme-' + t));
+  if(clockTheme !== 'classic') analog.classList.add('theme-' + clockTheme);
+}
+document.getElementById('clockThemeBtn').addEventListener('click', ()=>{
+  const idx = CLOCK_THEMES.indexOf(clockTheme);
+  clockTheme = CLOCK_THEMES[(idx + 1) % CLOCK_THEMES.length];
+  try{ localStorage.setItem('clockTheme', clockTheme); }catch(e){}
+  applyClockThemeUI();
+  showToast('Clock theme: ' + clockTheme[0].toUpperCase() + clockTheme.slice(1));
+});
+
 function applyClockStyleUI(){
   const analog = document.getElementById('analogClockFace');
   const btn = document.getElementById('clockStyleBtn');
+  const themeBtn = document.getElementById('clockThemeBtn');
   if(!analog || !btn) return;
   if(clockStyle === 'analog'){
     analog.style.display = '';
     btn.textContent = '🔢';
     btn.title = 'Switch to digital clock';
+    if(themeBtn) themeBtn.style.display = '';
   } else {
     analog.style.display = 'none';
     btn.textContent = '🕐';
     btn.title = 'Switch to analog clock';
+    if(themeBtn) themeBtn.style.display = 'none';
   }
+  applyClockThemeUI();
 }
 document.getElementById('clockStyleBtn').addEventListener('click', ()=>{
   clockStyle = clockStyle === 'digital' ? 'analog' : 'digital';
@@ -1496,11 +1518,17 @@ async function checkFxRate(){
   previewEl.textContent = 'Checking live exchange rate…';
 
   try{
-    const res = await fetch(`https://api.frankfurter.app/latest?amount=${amount}&from=${fromCode}&to=${toCode}`);
+    // v2 endpoint (api.frankfurter.dev) — the old v1 (api.frankfurter.app) is
+    // now frozen at 31 ECB-only currencies and doesn't cover NGN, GHS, or KES,
+    // three of the currencies this app itself offers. v2 covers 165 and
+    // includes all of them. It returns a bare rate, not a converted amount,
+    // so the multiplication happens here instead of via a `?amount=` param.
+    const res = await fetch(`https://api.frankfurter.dev/v2/rate/${fromCode}/${toCode}`);
+    if(!res.ok) throw new Error('rate lookup failed (' + res.status + ')');
     const data = await res.json();
-    const converted = data.rates && data.rates[toCode];
-    if(!converted) throw new Error('no rate');
-    const rate = converted / amount;
+    if(typeof data.rate !== 'number') throw new Error('no rate in response');
+    const rate = data.rate;
+    const converted = amount * rate;
     lastFxQuote = { rate, from: fromCode, to: toCode, date: data.date };
     previewEl.className = 'fx-preview';
     previewEl.textContent = `≈ ${fmt(converted)} at today's rate (1 ${fromCode} = ${rate.toFixed(2)} ${toCode}, ${data.date})`;
