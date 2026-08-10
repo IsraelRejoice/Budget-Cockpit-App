@@ -140,6 +140,12 @@ try{ sessionToken = localStorage.getItem(SESSION_KEY) || ''; }catch(e){ /* priva
 // isDirty = true means there are local changes not yet confirmed saved to
 // the backend (either never attempted, or the attempt failed/was offline).
 let isDirty = false;
+// While true, the debounced saveState() and the periodic trySyncNow() both
+// no-op instead of pushing to the backend. Used during restoreCycleFromHistory:
+// without this, a background sync landing in the gap between "POST restore"
+// and "GET fresh state" would push this browser's stale, pre-restore
+// transaction list and silently overwrite the just-restored data.
+let syncSuspended = false;
 function saveLocalMirror(){
   try{ localStorage.setItem(LOCAL_MIRROR_KEY, JSON.stringify({ state, dirty: isDirty, savedAt: Date.now() })); }catch(e){}
 }
@@ -245,6 +251,7 @@ function saveState(){
 
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    if(syncSuspended) return; // a restore is in flight — see restoreCycleFromHistory
     if(!API_URL){
       try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); isDirty = false; }
       catch(e){ /* stays dirty, harmless in the Claude-preview-only case */ }
@@ -275,7 +282,7 @@ function saveState(){
 // Retries a queued save the moment connectivity returns, and periodically
 // while online in case a save silently failed for another reason.
 function trySyncNow(){
-  if(!API_URL || !navigator.onLine || !isDirty) return;
+  if(!API_URL || !navigator.onLine || !isDirty || syncSuspended) return;
   updateSyncIndicator();
   apiPost('saveState', {state}).then(data=>{
     if(data && !data.error){
@@ -441,12 +448,48 @@ function updatePaydayCard(){
   const secs = totalSec%60;
   cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
 }
+let clockStyle = 'digital';
+try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
+function applyClockStyleUI(){
+  const analog = document.getElementById('analogClockFace');
+  const btn = document.getElementById('clockStyleBtn');
+  if(!analog || !btn) return;
+  if(clockStyle === 'analog'){
+    analog.style.display = '';
+    btn.textContent = '🔢';
+    btn.title = 'Switch to digital clock';
+  } else {
+    analog.style.display = 'none';
+    btn.textContent = '🕐';
+    btn.title = 'Switch to analog clock';
+  }
+}
+document.getElementById('clockStyleBtn').addEventListener('click', ()=>{
+  clockStyle = clockStyle === 'digital' ? 'analog' : 'digital';
+  try{ localStorage.setItem('clockStyle', clockStyle); }catch(e){}
+  applyClockStyleUI();
+});
+
 function startClock(){
+  applyClockStyleUI();
   function tick(){
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
-    const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
+    if(clockStyle === 'analog'){
+      document.getElementById('liveClock').textContent = dateStr;
+      const hours = now.getHours() % 12;
+      const mins = now.getMinutes();
+      const secs = now.getSeconds();
+      const hourDeg = (hours + mins/60) * 30;
+      const minDeg = (mins + secs/60) * 6;
+      const secDeg = secs * 6;
+      document.getElementById('clockHandHour').setAttribute('transform', 'rotate(' + hourDeg + ' 20 20)');
+      document.getElementById('clockHandMinute').setAttribute('transform', 'rotate(' + minDeg + ' 20 20)');
+      document.getElementById('clockHandSecond').setAttribute('transform', 'rotate(' + secDeg + ' 20 20)');
+    } else {
+      const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
+    }
     updatePaydayCard();
   }
   tick();
@@ -1115,6 +1158,14 @@ async function restoreCycleFromHistory(h){
   const ok = await askConfirm('Restore "' + h.label + '"?',
     'This brings its transactions and extra income back into your current cycle and removes it from History. Use this if it archived by mistake.');
   if(!ok) return;
+
+  // Cancel any debounced save already queued from something typed/edited just
+  // before this, and block the periodic background sync for the duration of
+  // the restore. Without this, a sync landing between the restore call and
+  // the state refresh below pushes this browser's stale pre-restore
+  // transactions and silently undoes the restore.
+  clearTimeout(saveTimer);
+  syncSuspended = true;
   try{
     const data = await apiPost('restoreCycle', {label: h.label});
     if(!data || data.error){ showToast('Could not restore: ' + (data && data.error || 'unknown error')); return; }
@@ -1129,6 +1180,8 @@ async function restoreCycleFromHistory(h){
     showToast('Cycle restored — ' + data.restoredTransactions + ' transaction(s) back');
   }catch(e){
     showToast('Could not reach backend to restore');
+  }finally{
+    syncSuspended = false;
   }
 }
 
