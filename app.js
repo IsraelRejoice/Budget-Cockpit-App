@@ -648,6 +648,21 @@ function barColor(status){
   return 'var(--teal)';
 }
 
+// Reusable small instrument dial — used on Savings and Debt cards so
+// goal/payoff progress reads the same "instrument readout" way the
+// Dashboard gauge cluster does, instead of a plain linear bar.
+function miniDialSVG(pct, colorVar, size){
+  size = size || 48;
+  const r = (size/2) - 4;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - Math.min(Math.max(pct,0),1) * circ;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);flex:none;">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${colorVar}" stroke-width="4"
+      stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}" stroke-linecap="round"/>
+  </svg>`;
+}
+
 /* ============================================================
    RENDER: DASHBOARD
    ============================================================ */
@@ -701,6 +716,21 @@ function renderDashboard(){
   const gaugePctEl = document.getElementById('gaugePct');
   gaugePctEl.textContent = Math.round(spendPctRaw*100)+'%';
   gaugePctEl.style.color = spendPctRaw > 1 ? 'var(--red)' : 'var(--text)';
+
+  // Flanking instrument dials — days-to-payday (fills as the cycle elapses)
+  // and savings contributed this cycle (fills toward the savings budget).
+  const miniCirc = 188.5;
+  const paydayRing = document.getElementById('dialPaydayRing');
+  paydayRing.setAttribute('stroke-dasharray', miniCirc);
+  paydayRing.setAttribute('stroke-dashoffset', miniCirc - Math.min(pacePct,1)*miniCirc);
+  document.getElementById('dialPaydayNum').textContent = daysLeft;
+
+  const savingsBudgetTotal = totalSavingsBudget();
+  const savingsPct = savingsBudgetTotal>0 ? Math.min(savingsContrib/savingsBudgetTotal, 1) : (savingsContrib>0?1:0);
+  const savingsRing = document.getElementById('dialSavingsRing');
+  savingsRing.setAttribute('stroke-dasharray', miniCirc);
+  savingsRing.setAttribute('stroke-dashoffset', miniCirc - savingsPct*miniCirc);
+  document.getElementById('dialSavingsNum').textContent = fmt(savingsContrib);
 
   const budgetPct = budget>0 ? spent/budget : 0;
   const paceBadge = document.getElementById('paceBadge');
@@ -791,9 +821,9 @@ function renderWeekdayChart(){
   totals.forEach((v,i)=>{
     const barH = (v/max) * (h-pad*2);
     const x = pad + i*((w-pad*2)/7) + 3;
-    ctx.fillStyle = i===highestIdx && v>0 ? '#E8B14C' : '#3FC7B0';
+    ctx.fillStyle = i===highestIdx && v>0 ? '#FFC24D' : '#00E5C7';
     ctx.fillRect(x, h-pad-barH, barW, Math.max(barH,1));
-    ctx.fillStyle = '#8892A6'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle = '#7B8494'; ctx.font='9px sans-serif'; ctx.textAlign='center';
     ctx.fillText(labels[i], x+barW/2, h-4);
   });
   ctx.textAlign = 'left';
@@ -823,7 +853,7 @@ function renderTrendChart(){
   const w = canvas.width, h = canvas.height, pad = 18;
   const max = Math.max(...cycles.map(c=>c.totalSpent), 1);
   const stepX = (w - pad*2) / (cycles.length - 1);
-  ctx.strokeStyle = '#3FC7B0'; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.strokeStyle = '#00E5C7'; ctx.lineWidth = 2; ctx.beginPath();
   cycles.forEach((c,i)=>{
     const x = pad + i*stepX;
     const y = h - pad - (c.totalSpent/max) * (h - pad*2);
@@ -834,7 +864,7 @@ function renderTrendChart(){
     const x = pad + i*stepX;
     const y = h - pad - (c.totalSpent/max) * (h - pad*2);
     const isLast = i === cycles.length - 1;
-    ctx.fillStyle = isLast ? '#E8B14C' : '#3FC7B0';
+    ctx.fillStyle = isLast ? '#FFC24D' : '#00E5C7';
     ctx.beginPath(); ctx.arc(x, y, isLast ? 3.5 : 2.5, 0, Math.PI*2); ctx.fill();
   });
   if(note){
@@ -921,9 +951,12 @@ function renderCategoryList(){
     div.className = 'cat';
     div.innerHTML = `
       <div class="cat-top">
-        <div>
-          <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
-          <div class="cat-group">${escapeHtml(cat.group)}</div>
+        <div style="display:flex;align-items:center;">
+          <span class="status-light" style="background:${barColor(status)};box-shadow:0 0 6px ${barColor(status)};"></span>
+          <div>
+            <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
+            <div class="cat-group">${escapeHtml(cat.group)}</div>
+          </div>
         </div>
         <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(budget)}${rolloverNote}</div>
       </div>
@@ -1061,15 +1094,17 @@ function renderSavingsTab(){
     const div = document.createElement('div');
     div.className = 'save-card';
     div.innerHTML = `
-      <div class="save-top">
-        <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
-        <div class="save-amt">${fmt(total)}</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        ${goal>0 ? `<div style="position:relative;flex:none;">${miniDialSVG(pct,'var(--teal)',48)}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;">${Math.round(pct*100)}%</div></div>` : ''}
+        <div style="flex:1;min-width:0;">
+          <div class="save-top">
+            <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
+            <div class="save-amt">${fmt(total)}</div>
+          </div>
+          <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
+        </div>
       </div>
-      <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
-      ${goal>0 ? `
-        <div class="save-bar-track"><div class="save-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="save-foot"><span>${Math.round(pct*100)}% of goal</span><span>Goal: ${fmt(goal)}</span></div>
-      ` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
+      ${goal>0 ? `<div class="save-foot" style="margin-top:8px;"><span>Goal: ${fmt(goal)}</span></div>` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
     `;
     wrap.appendChild(div);
   });
@@ -1103,10 +1138,14 @@ function renderDebtTab(){
     focusWrap.innerHTML = `
       <div class="debt-focus-card">
         <div class="focus-badge">CURRENTLY SERVICING</div>
-        <div class="debt-top"><div class="debt-name">${escapeHtml(focus.creditor)}</div><div class="debt-amt">${fmt(rem)} left</div></div>
-        <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
-        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% paid off</span><span>Owed: ${fmt(focus.amount)}</span></div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="position:relative;flex:none;">${miniDialSVG(pct,'var(--gold)',56)}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;">${Math.round(pct*100)}%</div></div>
+          <div style="flex:1;min-width:0;">
+            <div class="debt-top" style="margin-bottom:0;"><div class="debt-name">${escapeHtml(focus.creditor)}</div><div class="debt-amt">${fmt(rem)} left</div></div>
+            <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
+          </div>
+        </div>
+        <div class="debt-foot" style="margin-top:10px;"><span>Owed: ${fmt(focus.amount)}</span></div>
         <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px;">${why}</p>
         <button class="btn btn-teal" style="margin:0;" data-debtpay="${focus.id}">Log a payment</button>
       </div>
@@ -1124,11 +1163,12 @@ function renderDebtTab(){
       const rem = remainingForDebt(debt);
       const pct = debt.amount>0 ? Math.min(paidForDebt(debt.id)/debt.amount,1) : 0;
       const isFocused = focus && focus.id===debt.id;
+      const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
       const div = document.createElement('div');
       div.className = 'debt-card' + (isFocused ? ' focused' : '');
       div.innerHTML = `
         <div class="debt-top">
-          <div class="debt-name">${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
+          <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
           <div class="debt-amt">${rem<=0 ? '✅ Cleared' : fmt(rem)+' left'}</div>
         </div>
         <div class="debt-reason">${escapeHtml(debt.reason)||'—'}${debt.interestRate ? ' · '+debt.interestRate+'%/yr' : ''}</div>
@@ -2070,12 +2110,12 @@ function generateReportText(d, periodLabel, note){
   return lines.join('\n');
 }
 
-const PIE_COLORS = ['#E8B14C','#3FC7B0','#FF6B6B','#F2B84B','#8892A6','#B8802A','#128C77'];
+const PIE_COLORS = ['#FFC24D','#00E5C7','#FF3B30','#FFB020','#7B8494','#B8790A','#0E8A76'];
 function drawPieChart(canvas, data){
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const total = data.reduce((s,x)=>s+x.spent,0);
-  if(!total){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No spending yet', 20, canvas.height/2); return; }
+  if(!total){ ctx.fillStyle='#7B8494'; ctx.font='11px sans-serif'; ctx.fillText('No spending yet', 20, canvas.height/2); return; }
   const cx = 70, cy = canvas.height/2, r = 60;
   let start = -Math.PI/2;
   data.slice(0,6).forEach((x,i)=>{
@@ -2099,16 +2139,16 @@ function drawPieChart(canvas, data){
 function drawBarChart(canvas, entries){
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!entries.length){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No daily spend yet', 20, canvas.height/2); return; }
+  if(!entries.length){ ctx.fillStyle='#7B8494'; ctx.font='11px sans-serif'; ctx.fillText('No daily spend yet', 20, canvas.height/2); return; }
   const max = Math.max(...entries.map(e=>e.amount), 1);
   const w = canvas.width, h = canvas.height, pad=20, barW = Math.max((w-pad*2)/entries.length - 4, 2);
   entries.forEach((e,i)=>{
     const barH = (e.amount/max) * (h - pad*2);
     const x = pad + i*((w-pad*2)/entries.length);
-    ctx.fillStyle = '#3FC7B0';
+    ctx.fillStyle = '#00E5C7';
     ctx.fillRect(x, h-pad-barH, barW, barH);
   });
-  ctx.fillStyle = '#8892A6'; ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#7B8494'; ctx.font = '9px sans-serif';
   ctx.fillText(entries[0].date.slice(5), pad, h-6);
   ctx.fillText(entries[entries.length-1].date.slice(5), w-pad-28, h-6);
 }
