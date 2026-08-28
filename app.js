@@ -1,3 +1,4 @@
+
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -223,13 +224,15 @@ async function loadState(){
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
+  if(!state.recurringTemplates) state.recurringTemplates = [];
   if(!state.currency) state.currency = '₦';
   if(!state.bills) state.bills = [];
   if(!state.shares) state.shares = [];
-  state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; });
+  state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; if(c.rollover==null) c.rollover = false; });
   refreshCycleDates();
 
   applyTheme(state.theme);
+  applyPrivacyModeUI();
   document.getElementById('personalNotesInput').value = state.personalNotes || '';
   renderAll();
   updateSyncIndicator();
@@ -322,6 +325,7 @@ function updateSyncIndicator(){
 function fmt(n){
   n = Math.round(n||0);
   const sym = state.currency || '₦';
+  if(privacyMode) return sym + '••••'; // fixed-length mask — doesn't leak magnitude via digit count
   return sym + n.toLocaleString('en-NG');
 }
 function catById(id){ return state.categories.find(c=>c.id===id); }
@@ -339,7 +343,7 @@ function totalSpent(){
 function savingsContribThisCycle(){
   return state.transactions.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
 }
-function totalBudget(){ return spendingCategories().reduce((s,c)=>s+Number(c.budget),0); }
+function totalBudget(){ return spendingCategories().reduce((s,c)=>s+effectiveBudget(c),0); }
 function totalSavingsBudget(){ return savingsCategories().reduce((s,c)=>s+Number(c.budget),0); }
 function extraTotal(){ return state.extraIncome.reduce((s,e)=>s+Number(e.amount),0); }
 function combinedIncome(){ return Number(state.income||0) + extraTotal(); }
@@ -375,12 +379,38 @@ function escapeHtml(str){
   if(str==null) return '';
   return String(str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
-function showToast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2400);
+let toastTimer = null;
+let toastUndoCallback = null;
+function clearToastUndo(){
+  if(toastTimer){ clearTimeout(toastTimer); toastTimer = null; }
+  toastUndoCallback = null;
 }
+function showToast(msg){
+  clearToastUndo();
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  document.getElementById('toastUndoBtn').style.display = 'none';
+  t.classList.add('show');
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+// Same as showToast, but with a tappable Undo button that runs onUndo and
+// stays up for 6s (vs the usual 2.4s) so there's real time to catch a
+// mistaken delete.
+function showUndoToast(msg, onUndo){
+  clearToastUndo();
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  const btn = document.getElementById('toastUndoBtn');
+  btn.style.display = '';
+  toastUndoCallback = onUndo;
+  t.classList.add('show');
+  toastTimer = setTimeout(()=>{ t.classList.remove('show'); clearToastUndo(); }, 6000);
+}
+document.getElementById('toastUndoBtn').addEventListener('click', ()=>{
+  if(toastUndoCallback) toastUndoCallback();
+  document.getElementById('toast').classList.remove('show');
+  clearToastUndo();
+});
 // Updates an element's text and gives it a brief gold flash — but only
 // when the value actually changed, so it never flashes on every render.
 function setTextFlash(id, newText){
@@ -448,6 +478,24 @@ function updatePaydayCard(){
   const secs = totalSec%60;
   cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
 }
+let privacyMode = false;
+try{ privacyMode = localStorage.getItem('privacyMode') === '1'; }catch(e){}
+let txSearchTerm = '';
+function applyPrivacyModeUI(){
+  const btn = document.getElementById('privacyToggleBtn');
+  if(!btn) return;
+  btn.textContent = privacyMode ? '🙈' : '👁️';
+  btn.title = privacyMode ? 'Show figures' : 'Hide figures (privacy mode)';
+  btn.classList.toggle('privacy-active', privacyMode);
+  document.body.classList.toggle('privacy-on', privacyMode);
+}
+document.getElementById('privacyToggleBtn').addEventListener('click', ()=>{
+  privacyMode = !privacyMode;
+  try{ localStorage.setItem('privacyMode', privacyMode ? '1' : '0'); }catch(e){}
+  applyPrivacyModeUI();
+  renderAll(); // fmt() checks privacyMode directly, so every figure app-wide updates in one pass
+});
+
 let clockStyle = 'digital';
 try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
 const CLOCK_THEMES = ['classic','amber','teal','mono'];
@@ -563,14 +611,33 @@ document.getElementById('refreshQuoteBtn').addEventListener('click', randomLocal
 /* ============================================================
    STATUS LOGIC
    ============================================================ */
+// Rollover: when a category has "carry over unused budget" enabled, any
+// amount left unspent last cycle is added on top of this cycle's budget.
+// Approximation: uses the category's CURRENT budget as a stand-in for what
+// it was last cycle, since History only stores aggregate totals + the raw
+// transaction list, not a per-category budget snapshot. Fine in practice
+// since budgets rarely change cycle to cycle — but if you just changed
+// this category's budget, the rollover amount reflects the new figure,
+// not the one that was actually in effect last cycle.
+function rolloverAmount(cat){
+  if(!cat.rollover || cat.group==='Savings') return 0;
+  if(!state.history || !state.history.length) return 0;
+  const last = state.history[state.history.length-1];
+  const lastSpent = (last.transactions||[]).filter(t=>t.categoryId===cat.id).reduce((s,t)=>s+Number(t.amount),0);
+  return Math.max(0, Number(cat.budget) - lastSpent);
+}
+function effectiveBudget(cat){
+  return Number(cat.budget) + rolloverAmount(cat);
+}
 function statusForAmt(cat, s){
+  const budget = effectiveBudget(cat);
   if(cat.threshold==null){
-    if(cat.budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
-    return s>=cat.budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
+    if(budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
+    return s>=budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
   }
-  if(cat.budget<=0) return s>0 ? {label:'OVER BUDGET', cls:'st-over'} : {label:'No budget set', cls:'st-target'};
-  if(s>cat.budget) return {label:'OVER BUDGET', cls:'st-over'};
-  if(s/cat.budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
+  if(budget<=0) return s>0 ? {label:'OVER BUDGET', cls:'st-over'} : {label:'No budget set', cls:'st-target'};
+  if(s>budget) return {label:'OVER BUDGET', cls:'st-over'};
+  if(s/budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
   return {label:'On track', cls:'st-ok'};
 }
 function statusFor(cat){ return statusForAmt(cat, spentFor(cat.id)); }
@@ -648,7 +715,7 @@ function renderDashboard(){
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
-  document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
+  document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 && !privacyMode ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
   bc.classList.toggle('over', income>0 && grandTotal > income);
 
   let alerts = 0;
@@ -660,6 +727,7 @@ function renderDashboard(){
   renderTxPreview();
   renderStreakAndBadges();
   renderWeekdayChart();
+  renderTrendChart();
   renderBillReminders();
 }
 
@@ -737,6 +805,51 @@ function renderWeekdayChart(){
 }
 
 /* ============================================================
+   MULTI-CYCLE SPENDING TREND CHART — complements the detailed
+   income-vs-spent bar comparison already on the History tab with a
+   quick-glance line of spend-only trend, visible right from Dashboard.
+   ============================================================ */
+function renderTrendChart(){
+  const canvas = document.getElementById('trendCanvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const cycles = [...state.history, {label: cycleLabelText(), totalSpent: totalSpent()}].slice(-8);
+  const note = document.getElementById('trendNote');
+  if(cycles.length < 2){
+    if(note) note.textContent = 'Archive a couple more cycles to see a trend';
+    return;
+  }
+  const w = canvas.width, h = canvas.height, pad = 18;
+  const max = Math.max(...cycles.map(c=>c.totalSpent), 1);
+  const stepX = (w - pad*2) / (cycles.length - 1);
+  ctx.strokeStyle = '#3FC7B0'; ctx.lineWidth = 2; ctx.beginPath();
+  cycles.forEach((c,i)=>{
+    const x = pad + i*stepX;
+    const y = h - pad - (c.totalSpent/max) * (h - pad*2);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  cycles.forEach((c,i)=>{
+    const x = pad + i*stepX;
+    const y = h - pad - (c.totalSpent/max) * (h - pad*2);
+    const isLast = i === cycles.length - 1;
+    ctx.fillStyle = isLast ? '#E8B14C' : '#3FC7B0';
+    ctx.beginPath(); ctx.arc(x, y, isLast ? 3.5 : 2.5, 0, Math.PI*2); ctx.fill();
+  });
+  if(note){
+    const first = cycles[0].totalSpent, last = cycles[cycles.length-1].totalSpent;
+    if(first > 0){
+      const pctChange = Math.round(((last-first)/first)*100);
+      note.textContent = pctChange===0 ? 'Steady across the last ' + cycles.length + ' cycles'
+        : (pctChange>0 ? '↑ ' : '↓ ') + Math.abs(pctChange) + '% vs ' + cycles.length + ' cycles ago';
+    } else {
+      note.textContent = 'Spending trend over the last ' + cycles.length + ' cycles';
+    }
+  }
+}
+
+/* ============================================================
    BILL / SUBSCRIPTION REMINDERS
    ============================================================ */
 function upcomingBills(withinDays){
@@ -799,8 +912,11 @@ function renderCategoryList(){
   document.getElementById('catTag').textContent = cats.length + ' tracked';
   cats.forEach(cat=>{
     const spent = spentFor(cat.id);
-    const pct = cat.budget>0 ? Math.min(spent/cat.budget,1) : (spent>0?1:0);
+    const budget = effectiveBudget(cat);
+    const rollover = rolloverAmount(cat);
+    const pct = budget>0 ? Math.min(spent/budget,1) : (spent>0?1:0);
     const status = statusFor(cat);
+    const rolloverNote = rollover>0 ? ` <span style="color:var(--teal);">(+${fmt(rollover)} rollover)</span>` : '';
     const div = document.createElement('div');
     div.className = 'cat';
     div.innerHTML = `
@@ -809,7 +925,7 @@ function renderCategoryList(){
           <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
           <div class="cat-group">${escapeHtml(cat.group)}</div>
         </div>
-        <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(cat.budget)}</div>
+        <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(budget)}${rolloverNote}</div>
       </div>
       <div class="bar-track">
         <div class="bar-fill" style="width:${pct*100}%; background:${barColor(status)};"></div>
@@ -817,7 +933,7 @@ function renderCategoryList(){
       </div>
       <div class="status-row">
         <span class="status-badge ${status.cls}">${status.label}</span>
-        <span style="font-size:10px;color:var(--muted);">${cat.budget>0?Math.round(pct*100):0}% used</span>
+        <span style="font-size:10px;color:var(--muted);">${budget>0?Math.round(pct*100):0}% used</span>
       </div>
     `;
     list.appendChild(div);
@@ -832,9 +948,22 @@ function renderTxPreview(){
   sorted.forEach(t=>renderTxRow(wrap, t, true));
 }
 
+function deleteTxWithUndo(t){
+  const idx = state.transactions.findIndex(x=>x.id===t.id);
+  if(idx===-1) return;
+  const removed = state.transactions[idx];
+  state.transactions = state.transactions.filter(x=>x.id!==t.id);
+  saveState(); renderAll();
+  showUndoToast('Expense removed', ()=>{
+    state.transactions.splice(Math.min(idx, state.transactions.length), 0, removed);
+    saveState(); renderAll();
+  });
+}
+
 function renderTxRow(container, t, showDelete){
   const cat = catById(t.categoryId);
   const savingsTag = cat && cat.group==='Savings' ? '<span class="tx-tag-savings">SAVINGS</span>' : '';
+  const recurTag = t.recurTemplateId ? ' 🔁' : '';
   const methodTag = t.method ? ' · ' + escapeHtml(t.method) : '';
 
   const wrap = document.createElement('div');
@@ -846,7 +975,7 @@ function renderTxRow(container, t, showDelete){
     </div>
     <div class="tx-row" style="cursor:pointer;">
       <div class="tx-left">
-        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}</div>
+        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
         <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
       </div>
       <div style="display:flex;align-items:center;">
@@ -873,16 +1002,12 @@ function renderTxRow(container, t, showDelete){
   if(showDelete){
     row.querySelector('.tx-del').addEventListener('click', (e)=>{
       e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
+      deleteTxWithUndo(t);
     });
     const delBtn = wrap.querySelector('.tx-swipe-del');
     if(delBtn) delBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
+      deleteTxWithUndo(t);
     });
   }
   attachSwipe(row);
@@ -1143,9 +1268,18 @@ function renderHistory(){
   }
 
   const txWrap = document.getElementById('txListFull');
-  const sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
-  document.getElementById('txTagFull').textContent = sorted.length + ' logged';
-  txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">No expenses logged this cycle yet.</div>';
+  const term = (txSearchTerm || '').trim().toLowerCase();
+  let sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
+  if(term){
+    sorted = sorted.filter(t=>{
+      const cat = catById(t.categoryId);
+      return (t.desc||'').toLowerCase().includes(term) || (cat && cat.name.toLowerCase().includes(term));
+    });
+    document.getElementById('txTagFull').textContent = sorted.length + ' match' + (sorted.length===1?'':'es');
+  } else {
+    document.getElementById('txTagFull').textContent = sorted.length + ' logged';
+  }
+  txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">' + (term ? 'No transactions match "' + escapeHtml(txSearchTerm) + '".' : 'No expenses logged this cycle yet.') + '</div>';
   sorted.forEach(t=>renderTxRow(txWrap, t, true));
 
   renderPastCycles();
@@ -1223,6 +1357,50 @@ document.getElementById('yearReportBtn').addEventListener('click', ()=>{
 /* ============================================================
    RENDER: SETTINGS
    ============================================================ */
+/* ============================================================
+   DRAG-TO-REORDER CATEGORIES (Settings) — Pointer Events cover mouse and
+   touch with one code path. Reordering only happens within state.categories'
+   array order (which is exactly what the backend persists and reads back),
+   so no new schema field is needed — just the array order itself.
+   ============================================================ */
+let dragCatId = null;
+function attachCatDrag(handle, div){
+  handle.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    dragCatId = div.dataset.catId;
+    div.classList.add('dragging');
+    div.style.opacity = '0.6';
+    try{ handle.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  handle.addEventListener('pointermove', (e)=>{
+    if(dragCatId !== div.dataset.catId) return;
+    const wrap = document.getElementById('settingsCatList');
+    const rows = [...wrap.querySelectorAll('.settings-cat')];
+    const y = e.clientY;
+    for(const row of rows){
+      if(row === div) continue;
+      const rect = row.getBoundingClientRect();
+      if(y > rect.top && y < rect.bottom){
+        if(y < rect.top + rect.height/2){ wrap.insertBefore(div, row); }
+        else { wrap.insertBefore(div, row.nextSibling); }
+        break;
+      }
+    }
+  });
+  const finishDrag = ()=>{
+    if(dragCatId !== div.dataset.catId) return;
+    div.classList.remove('dragging');
+    div.style.opacity = '';
+    dragCatId = null;
+    const wrap = document.getElementById('settingsCatList');
+    const newOrderIds = [...wrap.querySelectorAll('.settings-cat')].map(el=>el.dataset.catId);
+    state.categories.sort((a,b)=> newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
+    saveState(); renderAll();
+  };
+  handle.addEventListener('pointerup', finishDrag);
+  handle.addEventListener('pointercancel', finishDrag);
+}
+
 function renderSettings(){
   const curSel = document.getElementById('currencySelect');
   if(!curSel.options.length){
@@ -1237,7 +1415,7 @@ function renderSettings(){
   const budget = totalBudget();
   const income = combinedIncome();
   const totalLine = document.getElementById('budgetTotalLine');
-  document.getElementById('budgetTotalVal').textContent = fmt(budget) + (income>0 ? ' (' + Math.round(budget/income*100) + '% of income)' : '');
+  document.getElementById('budgetTotalVal').textContent = fmt(budget) + (income>0 && !privacyMode ? ' (' + Math.round(budget/income*100) + '% of income)' : '');
   totalLine.classList.toggle('over', income>0 && (budget + totalSavingsBudget()) > income);
 
   const wrap = document.getElementById('settingsCatList');
@@ -1245,10 +1423,14 @@ function renderSettings(){
   state.categories.forEach(cat=>{
     const div = document.createElement('div');
     div.className = 'settings-cat';
+    div.dataset.catId = cat.id;
     const isSavings = cat.group === 'Savings';
     div.innerHTML = `
       <div class="settings-cat-name" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></span>
+        <span style="display:flex;align-items:center;">
+          <span class="cat-drag-handle" title="Drag to reorder" aria-label="Drag to reorder" style="cursor:grab;color:var(--muted);margin-right:8px;touch-action:none;font-size:14px;">⠿</span>
+          ${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span>
+        </span>
         <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category" aria-label="Delete category"
           style="background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px;">🗑</button>
       </div>
@@ -1267,6 +1449,11 @@ function renderSettings(){
           <input type="number" class="cat-goal" data-id="${cat.id}" value="${cat.goal||0}" min="0" step="1">
         </div>`}
       </div>
+      ${!isSavings ? `
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin:-6px 0 8px;cursor:pointer;">
+        <input type="checkbox" class="cat-rollover" data-id="${cat.id}" style="width:auto;margin:0;" ${cat.rollover?'checked':''}>
+        Carry over unused budget to next cycle
+      </label>` : ''}
     `;
     wrap.appendChild(div);
   });
@@ -1288,6 +1475,16 @@ function renderSettings(){
       saveState(); renderAll();
     });
   });
+  wrap.querySelectorAll('.cat-rollover').forEach(inp=>{
+    inp.addEventListener('change', e=>{
+      catById(e.target.dataset.id).rollover = e.target.checked;
+      saveState(); renderAll();
+      showToast(e.target.checked ? 'Rollover enabled' : 'Rollover disabled');
+    });
+  });
+  wrap.querySelectorAll('.cat-drag-handle').forEach(handle=>{
+    attachCatDrag(handle, handle.closest('.settings-cat'));
+  });
   wrap.querySelectorAll('.cat-delete').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const id = btn.dataset.id;
@@ -1304,6 +1501,7 @@ function renderSettings(){
   });
 
   renderBillsList();
+  renderRecurringList();
 }
 
 function renderBillsList(){
@@ -1342,6 +1540,38 @@ document.getElementById('addBillBtn').addEventListener('click', ()=>{
   document.getElementById('newBillDueDay').value = '';
   showToast('Bill added');
 });
+
+function renderRecurringList(){
+  const wrap = document.getElementById('recurringList');
+  const tpls = state.recurringTemplates || [];
+  document.getElementById('recurTag').textContent = tpls.length + ' active';
+  if(!tpls.length){ wrap.innerHTML = '<div class="empty-hist">None yet — check "Repeats every cycle" when logging an expense to add one.</div>'; return; }
+  wrap.innerHTML = '';
+  tpls.forEach(tpl=>{
+    const cat = catById(tpl.categoryId);
+    const row = document.createElement('div');
+    row.className = 'extra-row';
+    row.innerHTML = `
+      <div class="extra-left">
+        <div class="src">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(tpl.desc || (cat?cat.name:'Uncategorized'))}</div>
+        <div class="dt">${escapeHtml(cat?cat.name:'Uncategorized')} · ${fmt(tpl.amount)} each cycle</div>
+      </div>
+      <button class="tx-del" aria-label="Stop recurring">✕</button>
+    `;
+    row.querySelector('.tx-del').addEventListener('click', async ()=>{
+      const ok = await askConfirm('Stop "' + (tpl.desc || cat?.name || 'this') + '" from recurring?',
+        'It won\'t be auto-logged next cycle. Any past instances already logged stay untouched.');
+      if(!ok) return;
+      state.recurringTemplates = state.recurringTemplates.filter(rt=>rt.id!==tpl.id);
+      // Unlink any live transaction still pointing at this template so it
+      // doesn't silently re-link to a since-deleted recurring rule.
+      state.transactions.forEach(t=>{ if(t.recurTemplateId===tpl.id) delete t.recurTemplateId; });
+      saveState(); renderAll();
+      showToast('Recurring transaction stopped');
+    });
+    wrap.appendChild(row);
+  });
+}
 
 /* ============================================================
    RENDER ALL + NAV
@@ -1444,6 +1674,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   document.getElementById('txCategory').value = state.categories[0] ? state.categories[0].id : '';
   document.getElementById('txDate').value = toDateInput(new Date());
   document.getElementById('voiceStatus').style.display = 'none';
+  document.getElementById('txRecurring').checked = false;
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -1455,6 +1686,7 @@ function openEditTx(t){
   document.getElementById('txMethod').value = t.method || '';
   document.getElementById('txDesc').value = t.desc || '';
   document.getElementById('txDate').value = t.date;
+  document.getElementById('txRecurring').checked = t.recurTemplateId != null;
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -1464,16 +1696,41 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
   const method = document.getElementById('txMethod').value;
   const desc = document.getElementById('txDesc').value.trim();
   const date = document.getElementById('txDate').value || toDateInput(new Date());
+  const wantsRecurring = document.getElementById('txRecurring').checked;
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  if(!state.recurringTemplates) state.recurringTemplates = [];
 
+  let t;
   if(editingTxId != null){
-    const t = state.transactions.find(x=>x.id===editingTxId);
+    t = state.transactions.find(x=>x.id===editingTxId);
     if(t){ Object.assign(t, {amount, categoryId, method, desc, date}); }
     showToast('Expense updated');
   } else {
-    state.transactions.push({id: Date.now(), amount, categoryId, desc, date, method});
+    t = {id: Date.now(), amount, categoryId, desc, date, method};
+    state.transactions.push(t);
     showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
   }
+
+  // Keep the recurring template in sync with the checkbox: create one if
+  // newly checked, update it in place if it already existed, or remove it
+  // if unchecked (this only stops FUTURE auto-logging — past instances of
+  // it are ordinary transactions and are untouched).
+  if(t){
+    if(wantsRecurring){
+      if(t.recurTemplateId){
+        const tpl = state.recurringTemplates.find(rt=>rt.id===t.recurTemplateId);
+        if(tpl) Object.assign(tpl, {categoryId, desc, amount, method});
+      } else {
+        const tplId = 'rt-' + Date.now();
+        state.recurringTemplates.push({id: tplId, categoryId, desc, amount, method});
+        t.recurTemplateId = tplId;
+      }
+    } else if(t.recurTemplateId){
+      state.recurringTemplates = state.recurringTemplates.filter(rt=>rt.id!==t.recurTemplateId);
+      delete t.recurTemplateId;
+    }
+  }
+
   saveState(); renderAll();
   closeSheetEl(addSheet); activeSheet=null; editingTxId=null;
   document.getElementById('txAmount').value=''; document.getElementById('txDesc').value='';
@@ -1624,7 +1881,13 @@ async function sendAiQuestion(){
   state.aiHistory.push({id: thinkingId, role:'bot', text:'Thinking…'});
   renderAiChat();
   try{
-    const data = await apiPost('askAI', {question: q});
+    const data = await apiPost('askAI', {
+      question: q,
+      // Last few PRIOR turns (excluding the question/placeholder just pushed
+      // above) give the assistant real conversational memory — e.g. "what
+      // about last week?" — instead of answering blind every time.
+      history: state.aiHistory.slice(0, -2).filter(m => !m.error).slice(-8).map(m => ({role: m.role, text: m.text}))
+    });
     const msg = state.aiHistory.find(m=>m.id===thinkingId);
     if(msg){
       msg.text = data.answer || data.error || 'No response — try again.';
@@ -1639,6 +1902,47 @@ async function sendAiQuestion(){
 document.getElementById('aiAskBtn').addEventListener('click', sendAiQuestion);
 document.getElementById('aiQuestion').addEventListener('keydown', (e)=>{
   if(e.key==='Enter'){ e.preventDefault(); sendAiQuestion(); }
+});
+
+/* ============================================================
+   KEYBOARD SHORTCUTS (desktop/browser use — app is otherwise fully
+   gesture-driven for mobile, so these are pure bonus for a keyboard+mouse
+   session and never required)
+   ============================================================ */
+document.addEventListener('keydown', (e)=>{
+  const tag = (e.target && e.target.tagName || '').toLowerCase();
+  const isTyping = tag==='input' || tag==='textarea' || tag==='select' || (e.target && e.target.isContentEditable);
+
+  if(e.key === 'Escape'){
+    if(activeSheet){ closeSheetEl(activeSheet); activeSheet = null; }
+    else if(isTyping) e.target.blur();
+    return;
+  }
+  if(isTyping) return; // don't hijack typing in any field below this point
+
+  if(e.key === 'n' || e.key === 'N'){
+    e.preventDefault();
+    document.getElementById('fabAdd').click();
+  } else if(e.key === '/'){
+    e.preventDefault();
+    document.querySelector('.nav-btn[data-view="history"]')?.click();
+    document.getElementById('txSearchInput').focus();
+  }
+});
+
+/* ============================================================
+   TRANSACTION SEARCH (History tab) — filters live, no backend round trip
+   ============================================================ */
+document.getElementById('txSearchInput').addEventListener('input', (e)=>{
+  txSearchTerm = e.target.value;
+  document.getElementById('txSearchClearBtn').style.display = txSearchTerm ? '' : 'none';
+  renderHistory();
+});
+document.getElementById('txSearchClearBtn').addEventListener('click', ()=>{
+  txSearchTerm = '';
+  document.getElementById('txSearchInput').value = '';
+  document.getElementById('txSearchClearBtn').style.display = 'none';
+  renderHistory();
 });
 
 /* ============================================================
@@ -1729,7 +2033,7 @@ function buildReportData(snapshot){
   const overBudget = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-over');
   const nearLimit = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-near');
 
-  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit };
+  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit, txs };
 }
 
 function generateReportText(d, periodLabel, note){
@@ -2147,6 +2451,27 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
   }catch(e){
     showToast('Could not generate PDF — try Copy instead');
   }
+});
+
+function csvEscape(v){
+  v = String(v==null ? '' : v);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+}
+document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
+  if(!currentReportD || !currentReportD.txs){ showToast('No transaction data for this report'); return; }
+  const rows = [['Date','Category','Description','Amount','Method']];
+  [...currentReportD.txs].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
+    const cat = catById(t.categoryId);
+    rows.push([t.date, cat ? cat.name : 'Uncategorized', t.desc || '', t.amount, t.method || '']);
+  });
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = currentReportFilename + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('CSV downloaded');
 });
 
 /* ============================================================
