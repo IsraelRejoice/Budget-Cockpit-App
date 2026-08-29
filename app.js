@@ -218,6 +218,7 @@ async function loadState(){
 
   if(!state.paydayDay) state.paydayDay = 25;
   if(!state.savingsAccumulated) state.savingsAccumulated = {};
+  if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
   if(!state.debts) state.debts = [];
   if(!state.debtStrategy) state.debtStrategy = 'avalanche';
   if(state.debtFocusId == null) state.debtFocusId = '';
@@ -350,7 +351,11 @@ function combinedIncome(){ return Number(state.income||0) + extraTotal(); }
 function lifetimeSaved(catId){ return (state.savingsAccumulated[catId]||0) + spentFor(catId); }
 
 function debtById(id){ return state.debts.find(d=>d.id===id); }
-function paidForDebt(debtId){ return state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0); }
+function paidForDebt(debtId){
+  const accumulated = (state.debtPaidAccumulated && state.debtPaidAccumulated[debtId]) || 0;
+  const liveThisCycle = state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0);
+  return accumulated + liveThisCycle;
+}
 function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
 function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
 function totalDebtPaid(){ return state.debts.reduce((s,d)=>s+paidForDebt(d.id),0); }
