@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Budget Cockpit — Personal Finance Tracker</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0B0E13">
+<meta name="theme-color" content="#0A0F1C">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
@@ -15,7 +15,7 @@
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src https://fonts.gstatic.com;
   img-src 'self' data:;
-  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.dev;
+  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.app;
   object-src 'none';
   base-uri 'self';
   frame-ancestors 'self';
@@ -33,28 +33,28 @@
 <!-- jsPDF is lazy-loaded on demand (see loadJsPdf()) instead of blocking initial page load -->
 <style>
 :root{
-  --bg:#0B0E13;
-  --panel:#151A21;
-  --panel-2:#1B222B;
-  --line:#262D38;
-  --gold:#FFC24D;
-  --teal:#00E5C7;
-  --red:#FF3B30;
-  --amber:#FFB020;
-  --text:#F5F7FA;
-  --muted:#7B8494;
-  --muted-2:#4A5262;
-  --shadow: 0 8px 24px rgba(0,0,0,.45);
+  --bg:#0A0F1C;
+  --panel:#121A2C;
+  --panel-2:#182238;
+  --line:#232E45;
+  --gold:#E8B14C;
+  --teal:#3FC7B0;
+  --red:#FF6B6B;
+  --amber:#F2B84B;
+  --text:#EDEFF5;
+  --muted:#8892A6;
+  --muted-2:#5C6580;
+  --shadow: 0 8px 24px rgba(0,0,0,.35);
 }
 html[data-theme="light"]{
-  --bg:#F5F3EE;
+  --bg:#F6F4EF;
   --panel:#FFFFFF;
   --panel-2:#F0ECE3;
-  --line:#DED8C8;
-  --gold:#B8790A;
-  --teal:#0E8A76;
-  --red:#D6392E;
-  --amber:#B5720F;
+  --line:#E1DBCC;
+  --gold:#B8802A;
+  --teal:#128C77;
+  --red:#D14343;
+  --amber:#B57A16;
   --text:#1B2030;
   --muted:#6B7280;
   --muted-2:#96A0B5;
@@ -68,7 +68,7 @@ body{min-height:100vh; padding-bottom:92px;}
 :focus-visible{outline:2px solid var(--gold); outline-offset:2px; border-radius:4px;}
 
 .app{max-width:480px;margin:0 auto;position:relative;min-height:100vh;background:
-  radial-gradient(1200px 500px at 50% -200px, rgba(255,194,77,0.08), transparent),
+  radial-gradient(1200px 500px at 50% -200px, rgba(232,177,76,0.08), transparent),
   var(--bg);}
 
 /* Header */
@@ -76,57 +76,22 @@ body{min-height:100vh; padding-bottom:92px;}
 .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);font-weight:600;}
 .h1{font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;margin:4px 0 0;}
 .clock{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;}
-.clock-style-btn{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 4px;line-height:1;border-radius:6px;}
-.clock-style-btn:hover{color:var(--text);background:var(--panel);}
-#privacyToggleBtn.privacy-active{background:var(--amber);border-color:var(--amber);}
-
-/* Analog clock face themes — default (classic) uses the same palette as the
-   rest of the UI, so it already adapts to light/dark automatically. */
-#analogClockFace .clk-face{stroke:var(--line);}
-#analogClockFace .clk-center{fill:var(--text);}
-#analogClockFace #clockHandHour{stroke:var(--text);}
-#analogClockFace #clockHandMinute{stroke:var(--text);}
-#analogClockFace #clockHandSecond{stroke:var(--teal);}
-
-#analogClockFace.theme-amber .clk-face{stroke:var(--amber);}
-#analogClockFace.theme-amber .clk-center{fill:var(--amber);}
-#analogClockFace.theme-amber #clockHandHour{stroke:var(--amber);}
-#analogClockFace.theme-amber #clockHandMinute{stroke:var(--amber);}
-#analogClockFace.theme-amber #clockHandSecond{stroke:var(--red);}
-
-#analogClockFace.theme-teal .clk-face{stroke:var(--teal);}
-#analogClockFace.theme-teal .clk-center{fill:var(--teal);}
-#analogClockFace.theme-teal #clockHandHour{stroke:var(--teal);}
-#analogClockFace.theme-teal #clockHandMinute{stroke:var(--teal);}
-#analogClockFace.theme-teal #clockHandSecond{stroke:var(--amber);}
-
-#analogClockFace.theme-mono .clk-face{stroke:var(--muted);}
-#analogClockFace.theme-mono .clk-center{fill:var(--muted);}
-#analogClockFace.theme-mono #clockHandHour{stroke:var(--muted);}
-#analogClockFace.theme-mono #clockHandMinute{stroke:var(--muted);}
-#analogClockFace.theme-mono #clockHandSecond{stroke:var(--muted);}
 .theme-toggle{background:var(--panel);border:1px solid var(--line);border-radius:20px;width:40px;height:40px;
   display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;color:var(--text);flex:none;}
 
 /* Gauge card */
 .gauge-card{margin:14px 20px 0;background:linear-gradient(180deg,var(--panel-2),var(--panel));
-  border:1px solid var(--line);border-radius:20px;padding:22px 18px;display:flex;flex-direction:column;gap:16px;box-shadow:var(--shadow);}
-.gauge-cluster{display:flex;align-items:center;justify-content:center;gap:2px;}
+  border:1px solid var(--line);border-radius:20px;padding:22px 18px;display:flex;gap:18px;align-items:center;box-shadow:var(--shadow);}
 .gauge-wrap{position:relative;width:132px;height:132px;flex:none;}
 .gauge-wrap svg{transform:rotate(-90deg);}
 .gauge-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
 .gauge-pct{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;}
 .gauge-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;text-align:center;}
-.dial-mini{position:relative;width:72px;height:72px;flex:none;}
-.dial-mini svg{transform:rotate(-90deg);}
-.dial-mini-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-.dial-mini-num{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;line-height:1;}
-.dial-mini-lbl{font-size:7px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:3px;text-align:center;line-height:1.3;}
-.gauge-side{border-top:1px solid var(--line);padding-top:14px;}
+.gauge-side{flex:1;min-width:0;}
 .pace-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;margin-bottom:10px;}
-.pace-ahead{background:rgba(0,229,199,.15);color:var(--teal);}
-.pace-ontrack{background:rgba(255,194,77,.15);color:var(--gold);}
-.pace-behind{background:rgba(255,59,48,.15);color:var(--red);}
+.pace-ahead{background:rgba(63,199,176,.15);color:var(--teal);}
+.pace-ontrack{background:rgba(232,177,76,.15);color:var(--gold);}
+.pace-behind{background:rgba(255,107,107,.15);color:var(--red);}
 .gauge-stat{font-size:12px;color:var(--muted);margin-bottom:3px;}
 .gauge-stat b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
 .value-flash{animation:valueFlash .6s ease;}
@@ -147,20 +112,12 @@ body{min-height:100vh; padding-bottom:92px;}
 .payday-countdown{margin-top:10px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:13px;
   color:var(--gold);font-weight:700;letter-spacing:.02em;padding-top:10px;border-top:1px solid var(--line);}
 
-.budget-check{font-size:12px;color:var(--muted);}
-.budget-check .val{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
+.budget-check{margin:10px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
+  display:flex;justify-content:space-between;align-items:center;font-size:12px;}
+.budget-check.over{border-color:var(--red);background:rgba(255,107,107,.08);}
+.budget-check .lbl{color:var(--muted);}
+.budget-check .val{font-family:'JetBrains Mono',monospace;font-weight:700;}
 .budget-check.over .val{color:var(--red);}
-
-/* Insights accordion (quote + weekday chart) */
-.insights-toggle{margin:14px 20px 0;width:calc(100% - 40px);display:flex;align-items:center;justify-content:space-between;
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:12px;
-  font-weight:600;color:var(--text);cursor:pointer;font-family:inherit;}
-.insights-toggle span:first-child{display:flex;align-items:center;gap:6px;}
-.insights-chevron{color:var(--muted);transition:transform .2s ease;font-size:11px;}
-.insights-toggle.open .insights-chevron{transform:rotate(180deg);}
-.insights-body{display:none;}
-.insights-body.open{display:block;}
-.insights-body .quote-card,.insights-body .mini-card{margin-top:10px;}
 
 /* Safe-to-spend strip */
 .sts{margin:14px 20px 0;display:flex;background:var(--panel);border:1px solid var(--line);
@@ -173,13 +130,13 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Quote card */
 .quote-card{margin:14px 20px 0;border-radius:18px;padding:20px 18px 18px;position:relative;overflow:hidden;
-  background:linear-gradient(135deg, rgba(255,194,77,.14), rgba(0,229,199,.10) 60%, var(--panel) 100%);
+  background:linear-gradient(135deg, rgba(232,177,76,.14), rgba(63,199,176,.10) 60%, var(--panel) 100%);
   border:1px solid var(--line);}
 .quote-mark{position:absolute;top:-18px;left:8px;font-family:'Playfair Display',serif;font-size:110px;font-weight:700;
   color:var(--gold);opacity:.14;line-height:1;pointer-events:none;user-select:none;}
 .quote-eyebrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;position:relative;z-index:1;}
 .quote-eyebrow span{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:600;}
-.quote-refresh{background:rgba(255,194,77,.12);border:1px solid rgba(255,194,77,.3);color:var(--gold);font-size:11px;
+.quote-refresh{background:rgba(232,177,76,.12);border:1px solid rgba(232,177,76,.3);color:var(--gold);font-size:11px;
   cursor:pointer;padding:4px 9px;border-radius:20px;font-weight:600;}
 .quote-text{font-family:'Playfair Display',serif;font-style:italic;font-weight:600;font-size:16px;line-height:1.45;
   color:var(--text);position:relative;z-index:1;}
@@ -188,12 +145,12 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Badges */
 .badge-row{margin:12px 20px 0;display:flex;flex-wrap:wrap;gap:8px;}
-.badge-pill{background:linear-gradient(135deg,rgba(255,194,77,.18),rgba(0,229,199,.12));
+.badge-pill{background:linear-gradient(135deg,rgba(232,177,76,.18),rgba(63,199,176,.12));
   border:1px solid var(--gold);color:var(--text);font-size:11px;font-weight:600;padding:6px 12px;border-radius:20px;}
 
 /* Bill reminders */
 .bill-reminders{margin:12px 20px 0;display:flex;flex-direction:column;gap:6px;}
-.bill-pill{background:rgba(255,59,48,.1);border:1px solid rgba(255,59,48,.3);border-radius:12px;
+.bill-pill{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);border-radius:12px;
   padding:9px 13px;font-size:11.5px;color:var(--text);display:flex;gap:8px;align-items:center;}
 .bill-pill span{color:var(--red);font-weight:700;font-size:10.5px;flex:none;}
 
@@ -205,7 +162,7 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* What-if simulator entry */
 .whatif-btn{margin:14px 20px 0;width:calc(100% - 40px);padding:13px;border-radius:14px;border:1px dashed var(--gold);
-  background:rgba(255,194,77,.06);color:var(--gold);font-size:13px;font-weight:600;cursor:pointer;}
+  background:rgba(232,177,76,.06);color:var(--gold);font-size:13px;font-weight:600;cursor:pointer;}
 .whatif-result{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
 .whatif-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);padding:5px 0;}
 .whatif-row b{color:var(--text);font-family:'JetBrains Mono',monospace;}
@@ -214,10 +171,10 @@ body{min-height:100vh; padding-bottom:92px;}
 .share-result input{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;
   color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 10px;margin-bottom:8px;}
 .share-result-note{font-size:10.5px;color:var(--muted);line-height:1.4;}
-.fx-preview{background:rgba(0,229,199,.08);border:1px solid rgba(0,229,199,.3);border-radius:10px;
+.fx-preview{background:rgba(63,199,176,.08);border:1px solid rgba(63,199,176,.3);border-radius:10px;
   padding:10px 13px;margin:-6px 0 14px;font-size:12px;color:var(--teal);line-height:1.5;}
 .fx-preview.loading{color:var(--muted);border-color:var(--line);background:var(--panel-2);}
-.fx-preview.error{color:var(--red);border-color:rgba(255,59,48,.3);background:rgba(255,59,48,.06);}
+.fx-preview.error{color:var(--red);border-color:rgba(255,107,107,.3);background:rgba(255,107,107,.06);}
 
 /* Section headers */
 .section{margin:26px 20px 10px;display:flex;align-items:center;justify-content:space-between;}
@@ -229,7 +186,6 @@ body{min-height:100vh; padding-bottom:92px;}
 .cat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;transition:transform .12s ease;}
 .cat:active{transform:scale(.985);}
 .cat-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;}
-.status-light{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;vertical-align:middle;margin-right:7px;}
 .cat-name{font-size:13px;font-weight:600;}
 .cat-group{font-size:9px;color:var(--muted-2);text-transform:uppercase;letter-spacing:.06em;}
 .cat-amt{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);text-align:right;flex:none;}
@@ -239,9 +195,9 @@ body{min-height:100vh; padding-bottom:92px;}
 .bar-thresh{position:absolute;top:-2px;width:2px;height:12px;background:var(--muted);opacity:.6;}
 .status-row{display:flex;justify-content:space-between;align-items:center;margin-top:7px;}
 .status-badge{font-size:10px;font-weight:600;padding:3px 8px;border-radius:10px;}
-.st-ok{background:rgba(0,229,199,.15);color:var(--teal);}
-.st-near{background:rgba(255,176,32,.15);color:var(--amber);}
-.st-over{background:rgba(255,59,48,.15);color:var(--red);}
+.st-ok{background:rgba(63,199,176,.15);color:var(--teal);}
+.st-near{background:rgba(242,184,75,.15);color:var(--amber);}
+.st-over{background:rgba(255,107,107,.15);color:var(--red);}
 .st-target{background:rgba(139,146,166,.15);color:var(--muted);}
 .empty-hist{margin:0 20px;padding:26px 18px;text-align:center;color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:16px;font-size:12.5px;line-height:1.5;}
 
@@ -280,12 +236,30 @@ body{min-height:100vh; padding-bottom:92px;}
 .debt-actions button{flex:1;padding:9px;border-radius:10px;font-size:11.5px;font-weight:600;cursor:pointer;}
 .debt-btn-pay{background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;border:none;}
 .debt-btn-focus{background:var(--panel-2);color:var(--gold);border:1px solid var(--line);}
-.debt-btn-del{background:rgba(255,59,48,.1);color:var(--red);border:1px solid rgba(255,59,48,.25);flex:none;width:40px;}
+.debt-btn-del{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.25);flex:none;width:40px;}
 .focus-badge{display:inline-block;font-size:9.5px;font-weight:700;color:#1a1200;background:var(--gold);
   padding:2px 8px;border-radius:10px;margin-bottom:6px;letter-spacing:.03em;}
-.debt-focus-card{margin:0 20px 16px;background:linear-gradient(135deg,rgba(255,194,77,.15),var(--panel));
+.debt-focus-card{margin:0 20px 16px;background:linear-gradient(135deg,rgba(232,177,76,.15),var(--panel));
   border:1px solid var(--gold);border-radius:16px;padding:16px;}
 .debt-focus-empty{margin:0 20px 16px;padding:24px 18px;text-align:center;color:var(--muted);background:var(--panel);
+  border:1px dashed var(--line);border-radius:16px;font-size:12.5px;}
+
+/* Loans (money lent out) tracker — mirrors the Debt tracker's visual language
+   (same card shell, bar, actions) but in teal/green tones instead of red,
+   since these are money owed TO you rather than money you owe. */
+.loan-card{margin:0 20px 12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;}
+.loan-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;gap:8px;}
+.loan-name{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;}
+.loan-reason{font-size:11px;color:var(--muted);margin-bottom:10px;}
+.loan-amt{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--teal);font-weight:700;text-align:right;flex:none;}
+.loan-bar-track{height:10px;border-radius:6px;background:var(--panel-2);overflow:hidden;margin-bottom:6px;}
+.loan-bar-fill{height:100%;background:linear-gradient(90deg,var(--gold),#c98f2e);border-radius:6px;transition:width .5s;}
+.loan-foot{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--muted-2);margin-bottom:10px;}
+.loan-actions{display:flex;gap:8px;}
+.loan-actions button{flex:1;padding:9px;border-radius:10px;font-size:11.5px;font-weight:600;cursor:pointer;}
+.loan-btn-pay{background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;border:none;}
+.loan-btn-del{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.25);flex:none;width:40px;}
+.loan-empty{margin:0 20px 16px;padding:24px 18px;text-align:center;color:var(--muted);background:var(--panel);
   border:1px dashed var(--line);border-radius:16px;font-size:12.5px;}
 
 /* History */
@@ -315,6 +289,7 @@ body{min-height:100vh; padding-bottom:92px;}
 .tx-date{font-size:10px;color:var(--muted-2);margin-top:1px;}
 .tx-del{background:none;border:none;color:var(--muted-2);font-size:16px;padding:0 0 0 10px;cursor:pointer;}
 .tx-tag-savings{font-size:9px;color:var(--teal);font-weight:600;margin-left:6px;}
+.tx-tag-loan{font-size:9px;color:var(--gold);font-weight:600;margin-left:6px;}
 
 /* Swipe-to-reveal (mobile: swipe a row left to reveal Edit/Delete) */
 .tx-swipe-wrap{position:relative;overflow:hidden;border-radius:12px;}
@@ -354,18 +329,18 @@ body{min-height:100vh; padding-bottom:92px;}
 /* FAB */
 .fab{position:fixed;bottom:78px;right:calc(50% - 240px + 20px);width:56px;height:56px;border-radius:50%;
   background:linear-gradient(135deg,var(--gold),#c98f2e);border:none;color:#1a1200;font-size:26px;font-weight:700;
-  box-shadow:0 8px 24px rgba(255,194,77,.35);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;}
+  box-shadow:0 8px 24px rgba(232,177,76,.35);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;}
 @media (max-width:520px){.fab{right:20px;}}
 
 .ai-fab{position:fixed;bottom:78px;left:calc(50% - 240px + 20px);width:56px;height:56px;border-radius:50%;
   background:linear-gradient(135deg,var(--teal),#1c8f78 55%,var(--gold));border:none;color:#06231e;
-  box-shadow:0 8px 24px rgba(0,229,199,.4);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 24px rgba(63,199,176,.4);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;
   animation:aiPulse 2.6s ease-in-out infinite;}
 @media (max-width:520px){.ai-fab{left:20px;}}
 .ai-fab-icon{font-size:24px;animation:aiSpin 6s linear infinite;}
 @keyframes aiPulse{
-  0%,100%{ box-shadow:0 8px 24px rgba(0,229,199,.4), 0 0 0 0 rgba(0,229,199,.5); }
-  50%{ box-shadow:0 8px 28px rgba(0,229,199,.55), 0 0 0 10px rgba(0,229,199,0); }
+  0%,100%{ box-shadow:0 8px 24px rgba(63,199,176,.4), 0 0 0 0 rgba(63,199,176,.5); }
+  50%{ box-shadow:0 8px 28px rgba(63,199,176,.55), 0 0 0 10px rgba(63,199,176,0); }
 }
 @keyframes aiSpin{
   0%,85%{ transform:rotate(0deg); }
@@ -386,7 +361,7 @@ body{min-height:100vh; padding-bottom:92px;}
   border-bottom-right-radius:4px;}
 .ai-bubble.bot{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
   border-bottom-left-radius:4px;}
-.ai-bubble.bot.error{border-color:rgba(255,59,48,.4);color:var(--red);}
+.ai-bubble.bot.error{border-color:rgba(255,107,107,.4);color:var(--red);}
 .ai-empty{text-align:center;color:var(--muted);font-size:12px;padding:30px 20px;}
 .ai-input-row{display:flex;gap:8px;align-items:center;}
 .ai-input-row input{flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:24px;
@@ -409,7 +384,7 @@ body{min-height:100vh; padding-bottom:92px;}
 .voice-btn{background:var(--panel-2);border:1px solid var(--line);border-radius:50%;width:38px;height:38px;
   font-size:16px;cursor:pointer;flex:none;}
 .voice-btn.listening{background:linear-gradient(135deg,var(--red),#c94848);animation:aiPulse 1.2s ease-in-out infinite;}
-.voice-status{font-size:11.5px;color:var(--gold);margin:10px 0 -4px;padding:8px 12px;background:rgba(255,194,77,.08);
+.voice-status{font-size:11.5px;color:var(--gold);margin:10px 0 -4px;padding:8px 12px;background:rgba(232,177,76,.08);
   border-radius:10px;line-height:1.4;}
 .field{margin-bottom:14px;}
 .field label{display:block;font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;}
@@ -425,7 +400,7 @@ body{min-height:100vh; padding-bottom:92px;}
 .btn-primary{background:linear-gradient(135deg,var(--gold),#c98f2e);color:#1a1200;}
 .btn-teal{background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;}
 .btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--line);margin-top:8px;}
-.btn-danger{background:rgba(255,59,48,.12);color:var(--red);border:1px solid rgba(255,59,48,.3);margin-top:8px;}
+.btn-danger{background:rgba(255,107,107,.12);color:var(--red);border:1px solid rgba(255,107,107,.3);margin-top:8px;}
 .btn-row{display:flex;gap:8px;}
 .btn-row .btn{margin-top:8px;}
 
@@ -437,10 +412,10 @@ body{min-height:100vh; padding-bottom:92px;}
 .theme-row{display:flex;gap:8px;margin-bottom:14px;}
 .theme-opt{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2);
   text-align:center;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);}
-.theme-opt.active{border-color:var(--gold);color:var(--gold);background:rgba(255,194,77,.1);}
+.theme-opt.active{border-color:var(--gold);color:var(--gold);background:rgba(232,177,76,.1);}
 .budget-total-line{margin:0 20px 14px;padding:12px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
   display:flex;justify-content:space-between;align-items:center;font-size:12px;}
-.budget-total-line.over{border-color:var(--red);background:rgba(255,59,48,.08);color:var(--red);}
+.budget-total-line.over{border-color:var(--red);background:rgba(255,107,107,.08);color:var(--red);}
 .budget-total-line .v{font-family:'JetBrains Mono',monospace;font-weight:700;}
 
 .view{display:none;}
@@ -451,9 +426,8 @@ body{min-height:100vh; padding-bottom:92px;}
 }
 .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line);
   color:var(--text);font-size:12px;padding:10px 16px;border-radius:20px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none;
-  max-width:80%;text-align:center;display:flex;align-items:center;gap:10px;}
-.toast.show{opacity:1;pointer-events:auto;}
-.toast-undo-btn{background:none;border:none;color:var(--teal);font-weight:700;font-size:12px;cursor:pointer;padding:0;flex-shrink:0;}
+  max-width:80%;text-align:center;}
+.toast.show{opacity:1;}
 @keyframes confettiFall{
   0%{ transform:translateY(0) rotate(0deg); opacity:1; }
   100%{ transform:translateY(100vh) rotate(360deg); opacity:0; }
@@ -491,10 +465,10 @@ body{min-height:100vh; padding-bottom:92px;}
 @media (hover:hover) and (pointer:fine){
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
   .btn:hover{transform:translateY(-1px); filter:brightness(1.06);}
-  .btn-primary:hover, .btn-teal:hover{box-shadow:0 6px 16px rgba(255,194,77,.25);}
-  .cat, .save-card, .debt-card, .hist-card, .faq-item, .note-item, .extra-row, .tx-row{
+  .btn-primary:hover, .btn-teal:hover{box-shadow:0 6px 16px rgba(232,177,76,.25);}
+  .cat, .save-card, .debt-card, .loan-card, .hist-card, .faq-item, .note-item, .extra-row, .tx-row{
     transition:transform .15s ease, border-color .15s ease;}
-  .cat:hover, .save-card:hover, .debt-card:hover, .hist-card:hover{
+  .cat:hover, .save-card:hover, .debt-card:hover, .loan-card:hover, .hist-card:hover{
     transform:translateY(-2px); border-color:var(--gold);}
   .tx-row:hover{border-color:var(--gold);}
   .nav-btn{transition:color .15s ease, transform .15s ease;}
@@ -505,7 +479,7 @@ body{min-height:100vh; padding-bottom:92px;}
   .theme-opt:hover{border-color:var(--gold); color:var(--gold);}
   .section .link-btn:hover{text-decoration:underline;}
   .cat-delete:hover, .tx-del:hover{opacity:.7;}
-  .debt-actions button:hover{filter:brightness(1.08);}
+  .debt-actions button:hover, .loan-actions button:hover{filter:brightness(1.08);}
 }
 </style>
 </head>
@@ -536,62 +510,24 @@ body{min-height:100vh; padding-bottom:92px;}
       <div>
         <div class="eyebrow">Budget Cockpit</div>
         <div class="h1" id="cycleLabel">Current pay cycle</div>
-        <div class="clock-row" style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-          <div class="clock" id="liveClock" style="margin-top:0;">—</div>
-          <svg id="analogClockFace" viewBox="0 0 40 40" style="display:none;flex-shrink:0;" aria-label="Analog clock">
-            <circle class="clk-face" cx="20" cy="20" r="18" fill="none" stroke-width="1.5"/>
-            <circle class="clk-center" cx="20" cy="20" r="1.6"/>
-            <line id="clockHandHour" x1="20" y1="20" x2="20" y2="11" stroke-width="2" stroke-linecap="round"/>
-            <line id="clockHandMinute" x1="20" y1="20" x2="20" y2="7" stroke-width="1.5" stroke-linecap="round"/>
-            <line id="clockHandSecond" x1="20" y1="20" x2="20" y2="6" stroke-width="1"/>
-          </svg>
-          <button class="clock-style-btn" id="clockStyleBtn" type="button" aria-label="Switch clock style" title="Switch between digital and analog clock">🕐</button>
-          <button class="clock-style-btn" id="clockThemeBtn" type="button" aria-label="Change clock theme" title="Change clock face theme" style="display:none;">🎨</button>
-        </div>
+        <div class="clock" id="liveClock">—</div>
         <div class="clock" id="syncIndicator" style="margin-top:2px;">● Synced</div>
       </div>
-      <button class="theme-toggle" id="privacyToggleBtn" aria-label="Toggle privacy mode" title="Hide figures (privacy mode)" style="margin-right:8px;">👁️</button>
       <button class="theme-toggle" id="themeToggleBtn" aria-label="Toggle light/dark mode">🌙</button>
     </div>
 
     <div class="gauge-card">
-      <div class="gauge-cluster">
-        <div class="dial-mini">
-          <svg width="72" height="72" viewBox="0 0 72 72">
-            <circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="6"/>
-            <circle id="dialPaydayRing" cx="36" cy="36" r="30" fill="none" stroke="var(--amber)" stroke-width="6"
-              stroke-dasharray="188.5" stroke-dashoffset="188.5" stroke-linecap="round"/>
-          </svg>
-          <div class="dial-mini-center">
-            <div class="dial-mini-num mono" id="dialPaydayNum">—</div>
-            <div class="dial-mini-lbl">Days to<br>payday</div>
-          </div>
-        </div>
-
-        <div class="gauge-wrap">
-          <svg width="132" height="132" viewBox="0 0 132 132">
-            <circle cx="66" cy="66" r="56" fill="none" stroke="var(--line)" stroke-width="10" opacity=".6"/>
-            <circle id="gaugePace" cx="66" cy="66" r="56" fill="none" stroke="var(--line)" stroke-width="10"
-              stroke-dasharray="352" stroke-dashoffset="352" stroke-linecap="round"/>
-            <circle id="gaugeSpend" cx="66" cy="66" r="44" fill="none" stroke="var(--teal)" stroke-width="10"
-              stroke-dasharray="276" stroke-dashoffset="276" stroke-linecap="round"/>
-          </svg>
-          <div class="gauge-center">
-            <div class="gauge-pct mono" id="gaugePct">0%</div>
-            <div class="gauge-label">of income<br>spent</div>
-          </div>
-        </div>
-
-        <div class="dial-mini">
-          <svg width="72" height="72" viewBox="0 0 72 72">
-            <circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="6"/>
-            <circle id="dialSavingsRing" cx="36" cy="36" r="30" fill="none" stroke="#5AA8FF" stroke-width="6"
-              stroke-dasharray="188.5" stroke-dashoffset="188.5" stroke-linecap="round"/>
-          </svg>
-          <div class="dial-mini-center">
-            <div class="dial-mini-num mono" id="dialSavingsNum">—</div>
-            <div class="dial-mini-lbl">Saved<br>this cycle</div>
-          </div>
+      <div class="gauge-wrap">
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <circle cx="66" cy="66" r="56" fill="none" stroke="#3A4360" stroke-width="10" opacity=".35"/>
+          <circle id="gaugePace" cx="66" cy="66" r="56" fill="none" stroke="#3A4360" stroke-width="10"
+            stroke-dasharray="352" stroke-dashoffset="352" stroke-linecap="round"/>
+          <circle id="gaugeSpend" cx="66" cy="66" r="44" fill="none" stroke="#3FC7B0" stroke-width="10"
+            stroke-dasharray="276" stroke-dashoffset="276" stroke-linecap="round"/>
+        </svg>
+        <div class="gauge-center">
+          <div class="gauge-pct mono" id="gaugePct">0%</div>
+          <div class="gauge-label">of income<br>spent</div>
         </div>
       </div>
       <div class="gauge-side">
@@ -599,7 +535,6 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="gauge-stat">Income <b id="statIncome">—</b></div>
         <div class="gauge-stat">Spent <b id="statSpent">—</b> <span id="spentCompare" style="font-size:10px;"></span></div>
         <div class="gauge-stat">Remaining to spend <b id="statRemaining">—</b></div>
-        <div class="gauge-stat budget-check" id="budgetCheck">Budgeted (+savings) <span class="val" id="budgetCheckVal">—</span></div>
       </div>
     </div>
 
@@ -621,6 +556,11 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="badge-row" id="badgeRow" style="display:none;"></div>
     <div class="bill-reminders" id="billReminders" style="display:none;"></div>
 
+    <div class="budget-check" id="budgetCheck">
+      <span class="lbl">Total budgeted (all categories)</span>
+      <span class="val" id="budgetCheckVal">—</span>
+    </div>
+
     <div class="sts">
       <div class="sts-item">
         <div class="sts-val" id="daysLeft">—</div>
@@ -637,35 +577,23 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
-    <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
-
-    <button class="insights-toggle" id="insightsToggle" type="button">
-      <span>✦ Insights <span style="color:var(--muted);font-weight:400;margin-left:4px;">quote, weekday & trend</span></span>
-      <span class="insights-chevron" id="insightsChevron">▾</span>
-    </button>
-    <div class="insights-body" id="insightsBody">
-      <div class="quote-card">
-        <div class="quote-mark">"</div>
-        <div class="quote-eyebrow">
-          <span>✦ Money thought for today</span>
-          <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
-        </div>
-        <div class="quote-text" id="quoteText">Loading…</div>
-        <div class="quote-author" id="quoteAuthor"></div>
+    <div class="quote-card">
+      <div class="quote-mark">"</div>
+      <div class="quote-eyebrow">
+        <span>✦ Money thought for today</span>
+        <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
       </div>
-
-      <div class="mini-card">
-        <div class="mini-card-title">Weekday pattern</div>
-        <canvas id="weekdayCanvas" width="280" height="90"></canvas>
-        <div class="mini-card-note" id="weekdayHighest">—</div>
-      </div>
-
-      <div class="mini-card">
-        <div class="mini-card-title">Spending trend (last cycles)</div>
-        <canvas id="trendCanvas" width="280" height="90"></canvas>
-        <div class="mini-card-note" id="trendNote">—</div>
-      </div>
+      <div class="quote-text" id="quoteText">Loading…</div>
+      <div class="quote-author" id="quoteAuthor"></div>
     </div>
+
+    <div class="mini-card">
+      <div class="mini-card-title">Weekday pattern</div>
+      <canvas id="weekdayCanvas" width="280" height="90"></canvas>
+      <div class="mini-card-note" id="weekdayHighest">—</div>
+    </div>
+
+    <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
 
     <div class="section"><h2>Extra income this cycle</h2><span class="tag" id="extraTag">₦0 added</span></div>
     <div class="extra-list" id="extraList"></div>
@@ -685,6 +613,7 @@ body{min-height:100vh; padding-bottom:92px;}
     <div style="margin:0 20px 16px;">
       <div class="theme-row" style="margin-bottom:0;">
         <div class="theme-opt" id="financeTabDebt">💳 Debt</div>
+        <div class="theme-opt" id="financeTabLent">🤝 Lent</div>
         <div class="theme-opt" id="financeTabSavings">✚ Savings</div>
       </div>
     </div>
@@ -735,6 +664,41 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
+    <!-- ---- Lent panel (money YOU lent to others) ---- -->
+    <div id="financePanelLent" style="display:none;">
+      <p style="font-size:12px;color:var(--muted);margin:0 20px 16px;line-height:1.5;">
+        Money you've lent to friends or family. Lending it counts as an expense this cycle (it left your account),
+        and logging a repayment adds it back as extra income — so your totals always reflect real cash in hand.</p>
+
+      <div class="hist-summary" id="loanSummary" style="margin-bottom:14px;"></div>
+
+      <div class="section" style="margin-top:0;"><h2>Money lent out</h2><span class="tag" id="loanTag">0 tracked</span></div>
+      <div id="loanList"></div>
+
+      <div style="margin:0 20px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Log money lent out</div>
+        <div class="field">
+          <label>Lent to</label>
+          <input type="text" id="newLoanBorrower" placeholder="e.g. Chidi, Aunty Bisi">
+        </div>
+        <div class="field">
+          <label>Reason (optional)</label>
+          <input type="text" id="newLoanReason" placeholder="e.g. Rent shortfall, emergency">
+        </div>
+        <div class="settings-row">
+          <div class="field">
+            <label>Amount lent ₦</label>
+            <input type="number" id="newLoanAmount" min="0" step="1" placeholder="0">
+          </div>
+          <div class="field">
+            <label>Date lent</label>
+            <input type="date" id="newLoanDate">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="addLoanBtn">Log loan</button>
+      </div>
+    </div>
+
     <!-- ---- Savings panel ---- -->
     <div id="financePanelSavings" style="display:none;">
       <p style="font-size:12px;color:var(--muted);margin:0 20px 16px;line-height:1.5;">
@@ -761,10 +725,6 @@ body{min-height:100vh; padding-bottom:92px;}
     </div>
 
     <div class="section"><h2>All transactions this cycle</h2><span class="tag" id="txTagFull"></span></div>
-    <div style="margin:0 20px 10px;position:relative;">
-      <input type="text" id="txSearchInput" placeholder="Search by description or category…" style="width:100%;box-sizing:border-box;padding:10px 32px 10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:13px;">
-      <button id="txSearchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:4px;">✕</button>
-    </div>
     <div class="tx-list" id="txListFull"></div>
   </div>
 
@@ -780,10 +740,12 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="faq-a">Your pay date is set to a fixed day of the month (default 25th). If that date falls on a Saturday or Sunday, the cycle automatically shifts to the preceding Friday — matching how most salaries are actually paid.</div></div>
       <div class="faq-item"><div class="faq-q">Why aren't Savings/Emergency Fund counted as spending?</div>
         <div class="faq-a">Money you deliberately move into savings isn't an expense — it's still yours, just earmarked. It's excluded from "Spent" and tracked separately on the Savings tab, where it accumulates toward a goal over time instead of resetting each cycle.</div></div>
+      <div class="faq-item"><div class="faq-q">I lent a friend money — how do I track that, and what happens when they pay me back?</div>
+        <div class="faq-a">Go to Finance → Lent and log it there. Lending money is treated as an expense this cycle under the "Money Lent Out" category, since it's real cash that left your account — it counts toward your budget the same way any other expense does. When they pay you back, tap "Log repayment" on that loan; it's added back as extra income (you'll see it in the Extra income list on Dashboard, tagged as a loan repayment) and the loan's remaining balance drops. Nothing is double-counted either way.</div></div>
       <div class="faq-item"><div class="faq-q">What's "Safe to spend per day"?</div>
         <div class="faq-a">(Remaining budget) ÷ (days left until payday). It's a pace check — if you spend at or below this amount each remaining day, you'll land within budget by payday. Spending more than this on a given day just means tighter days ahead, not an emergency.</div></div>
       <div class="faq-item"><div class="faq-q">What happens when I archive a cycle?</div>
-        <div class="faq-a">Totals are saved to History, savings contributions fold into your lifetime accumulated total, a report is generated, and transactions/extra income reset. Category budgets and goals stay the same.</div></div>
+        <div class="faq-a">Totals are saved to History, savings contributions fold into your lifetime accumulated total, a report is generated, and transactions/extra income reset. Category budgets and goals stay the same. Outstanding debts and loans carry over untouched — archiving only resets the current cycle's spending, not what's still owed either way.</div></div>
       <div class="faq-item"><div class="faq-q">Can I share this app with someone else?</div>
         <div class="faq-a">If you send them your HTML file as-is, they'd be reading and writing to your same Google Sheet — their data would mix into yours, not stay separate, and you would not get a distinct report for them. For someone else to use this properly, they need their own copy: their own Google Sheet, their own Apps Script deployment, and their own token pasted into their own copy of this file.</div></div>
       <div class="faq-item"><div class="faq-q">How do I edit or delete an expense I logged wrong?</div>
@@ -793,7 +755,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">I received income in a different currency (e.g. dollars) — how does that get added to my Naira total?</div>
         <div class="faq-a">When logging Extra Income, pick the currency you actually received it in. The app fetches a live exchange rate at that moment (via the Frankfurter rate API, which sources European Central Bank reference rates) and converts it to your home currency automatically — you'll see a preview like "$50 ≈ ₦77,500 at today's rate" before saving. The original amount, currency, the exact rate used, and the date are all kept on the entry so you can see exactly how it was converted later. Only your home-currency total ever counts toward your budget — nothing is double-counted.</div></div>
       <div class="faq-item"><div class="faq-q">How do I add or remove a category?</div>
-        <div class="faq-a">In Settings, scroll to "Add a new category" — give it a name and a group (Needs/Wants/Savings). To remove one, tap the 🗑 next to it in the category list. If it still has spending logged this cycle, you'll be warned first; the transactions themselves aren't deleted, they just show as "Uncategorized."</div></div>
+        <div class="faq-a">In Settings, scroll to "Add a new category" — give it a name and a group (Needs/Wants/Savings). To remove one, tap the 🗑 next to it in the category list. If it still has spending logged this cycle, you'll be warned first; the transactions themselves aren't deleted, they just show as "Uncategorized." The built-in "Debt repayment" and "Money Lent Out" categories can't be deleted while you still have an active debt or loan tracked, since removing them would break that tracker's link to your transactions — clear or delete those first if you really want to remove the category.</div></div>
       <div class="faq-item"><div class="faq-q">What's the difference between the Debt tracker and the "Debt repayment" category?</div>
         <div class="faq-a">The Debt repayment category is a budget line, like Rent or Food — it caps how much you plan to spend on debt this cycle. The Debt tracker (in the Finance tab) is more granular: it tracks individual creditors, how much you owe each one, and lets you log payments per-creditor. Every debt payment you log there also counts toward the Debt repayment category automatically, so the two stay in sync.</div></div>
       <div class="faq-item"><div class="faq-q">How does the Avalanche/Snowball/Manual strategy work?</div>
@@ -807,7 +769,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">Can I download or email my report?</div>
         <div class="faq-a">Both. "Copy text" copies a plain-text version. "Download PDF" generates a formatted document with charts. "Email it" opens your email app with the report pre-filled, addressed to whatever email you've set in Settings — you still have to hit send yourself, since a web page can't send email on its own.</div></div>
       <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used to train anything?</div>
-        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself via Code.gs, and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect.</div></div>
+        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself via Code.gs, and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect. Note that hosted AI providers periodically retire model versions; if the assistant ever stops responding, Code.gs now automatically retries with a backup model, and the error message will tell you if both failed.</div></div>
       <div class="faq-item"><div class="faq-q">Where does my AI conversation history go?</div>
         <div class="faq-a">It's saved in your own backend along with everything else, so it persists between visits. Use the 🗑 icon in the AI assistant header to clear it.</div></div>
       <div class="faq-item"><div class="faq-q">What's the "My own notes" box for?</div>
@@ -852,6 +814,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="note-item"><div class="note-num">03</div><div class="note-text"><b>Log expenses the same day.</b> The categories and pace alerts only stay useful if the data is current.</div></div>
       <div class="note-item"><div class="note-num">04</div><div class="note-text"><b>If your total budgeted exceeds your income, something has to give.</b> Check the "Total budgeted" line on Dashboard and Settings — it turns red the moment your categories add up to more than you earn.</div></div>
       <div class="note-item"><div class="note-num">05</div><div class="note-text"><b>Review every payday.</b> Archive the cycle, read the generated report, and adjust next cycle's budgets based on what actually happened.</div></div>
+      <div class="note-item"><div class="note-num">06</div><div class="note-text"><b>Lending money is still your money — until it's repaid.</b> Track it in Finance → Lent so it doesn't quietly vanish from your mental accounting, and so you have a clear record of who owes you what.</div></div>
     </div>
 
     <div class="guide-block">
@@ -963,10 +926,6 @@ body{min-height:100vh; padding-bottom:92px;}
       <button class="btn btn-primary" id="addBillBtn">Add bill</button>
     </div>
 
-    <div class="section"><h2>Recurring transactions</h2><span class="tag" id="recurTag"></span></div>
-    <p style="font-size:11px;color:var(--muted);margin:-4px 20px 10px;line-height:1.5;">Auto-logged again the moment a new cycle starts. Set one up by checking "Repeats every cycle" when logging or editing an expense.</p>
-    <div id="recurringList" style="margin:0 20px 20px;"></div>
-
     <div class="section"><h2>Pay-cycle rollover</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;">
@@ -1043,9 +1002,6 @@ body{min-height:100vh; padding-bottom:92px;}
     <label>Date</label>
     <input type="date" id="txDate">
   </div>
-  <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin:0 0 18px;cursor:pointer;">
-    <input type="checkbox" id="txRecurring" style="width:auto;margin:0;"> 🔁 Repeats every cycle (auto-logged again next cycle)
-  </label>
   <button class="btn btn-primary" id="txSaveBtn">Add expense</button>
   <button class="btn btn-ghost" id="txCancelBtn">Cancel</button>
 </div>
@@ -1120,6 +1076,24 @@ body{min-height:100vh; padding-bottom:92px;}
   <button class="btn btn-ghost" id="debtPayCancelBtn">Cancel</button>
 </div>
 
+<!-- Loan repayment sheet (money a friend pays back to you) -->
+<div class="sheet" id="loanRepaySheet">
+  <div class="sheet-handle"></div>
+  <h3 id="loanRepayTitle">Log a repayment</h3>
+  <p style="font-size:11.5px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
+    This is added to your Extra income for this cycle and reduces how much is still owed on this loan.</p>
+  <div class="field">
+    <label>Amount (₦)</label>
+    <input type="number" id="loanRepayAmount" class="amt-input" inputmode="decimal" placeholder="0" min="0" step="1">
+  </div>
+  <div class="field">
+    <label>Date</label>
+    <input type="date" id="loanRepayDate">
+  </div>
+  <button class="btn btn-primary" id="loanRepaySaveBtn">Log repayment</button>
+  <button class="btn btn-ghost" id="loanRepayCancelBtn">Cancel</button>
+</div>
+
 <!-- Report sheet -->
 <div class="sheet" id="reportSheet">
   <div class="sheet-handle"></div>
@@ -1140,7 +1114,6 @@ body{min-height:100vh; padding-bottom:92px;}
   <div class="btn-row">
     <button class="btn btn-primary" id="copyReportBtn">Copy text</button>
     <button class="btn btn-teal" id="downloadPdfBtn">Download PDF</button>
-    <button class="btn btn-ghost" id="downloadCsvBtn" style="width:auto;padding:12px 16px;">CSV</button>
   </div>
   <button class="btn btn-ghost" id="emailReportBtn">Email it</button>
   <button class="btn btn-ghost" id="shareReportBtn">🔗 Create shareable link (7 days)</button>
@@ -1178,7 +1151,7 @@ body{min-height:100vh; padding-bottom:92px;}
   </div>
 </div>
 
-<div class="toast" id="toast"><span id="toastMsg"></span><button class="toast-undo-btn" id="toastUndoBtn" style="display:none;">Undo</button></div>
+<div class="toast" id="toast"></div>
 
 <script src="app.js" defer></script>
 </body>
