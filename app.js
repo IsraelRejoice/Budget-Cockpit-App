@@ -220,8 +220,6 @@ async function loadState(){
   if(!state.savingsAccumulated) state.savingsAccumulated = {};
   if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
   if(!state.debts) state.debts = [];
-  if(!state.loans) state.loans = [];
-  if(!state.loanPaidAccumulated) state.loanPaidAccumulated = {};
   if(!state.debtStrategy) state.debtStrategy = 'avalanche';
   if(state.debtFocusId == null) state.debtFocusId = '';
   if(!state.aiHistory) state.aiHistory = [];
@@ -360,19 +358,8 @@ function paidForDebt(debtId){
 }
 function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
 function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
-
-function loanById(id){ return state.loans.find(l=>l.id===id); }
-function paidForLoan(loanId){
-  const accumulated = (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
-  const liveThisCycle = state.extraIncome.filter(x=>x.loanId===loanId).reduce((s,x)=>s+Number(x.amount),0);
-  return accumulated + liveThisCycle;
-}
-function remainingForLoan(loan){ return Math.max(Number(loan.amount) - paidForLoan(loan.id), 0); }
-function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
 function totalDebtPaid(){ return state.debts.reduce((s,d)=>s+paidForDebt(d.id),0); }
 function totalDebtRemaining(){ return Math.max(totalDebtOwed()-totalDebtPaid(),0); }
-function totalLoanRepaid(){ return state.loans.reduce((s,l)=>s+paidForLoan(l.id),0); }
-function totalLoanRemaining(){ return Math.max(totalLoaned()-totalLoanRepaid(),0); }
 function activeDebts(){ return state.debts.filter(d=>remainingForDebt(d)>0); }
 function suggestedFocusDebt(){
   const active = activeDebts();
@@ -722,20 +709,33 @@ function renderDashboard(){
   const spendPct = Math.min(spendPctRaw, 1);
   const { daysLeft, pacePct } = cyclePace();
 
-  // Hero card bar: simple width-based fill (budget-vs-spent), replacing the
-  // old circular dial cluster — more compact, reads at a glance like a
-  // standard balance/spend bar rather than an instrument dial.
-  const budgetPctForBar = budget>0 ? Math.min(spent/budget, 1) : (spent>0?1:0);
-  const heroBar = document.getElementById('heroBarFill');
-  heroBar.style.width = (budgetPctForBar*100) + '%';
-  heroBar.style.background = spent > budget && budget>0 ? 'var(--red)' : 'var(--teal)';
+  const spendCirc = 276.46, paceCirc = 351.86;
+  const spendEl = document.getElementById('gaugeSpend');
+  const paceEl = document.getElementById('gaugePace');
+  spendEl.setAttribute('stroke-dasharray', spendCirc);
+  spendEl.setAttribute('stroke-dashoffset', spendCirc - spendPct*spendCirc);
+  spendEl.style.stroke = spendPctRaw > 1 ? 'var(--red)' : 'var(--teal)';
+  paceEl.setAttribute('stroke-dasharray', paceCirc);
+  paceEl.setAttribute('stroke-dashoffset', paceCirc - Math.min(pacePct,1)*paceCirc);
 
   const gaugePctEl = document.getElementById('gaugePct');
-  gaugePctEl.textContent = (budget>0 ? Math.round((spent/budget)*100) : 0)+'% of budget';
-  gaugePctEl.style.color = (budget>0 && spent>budget) ? 'var(--red)' : 'var(--muted)';
+  gaugePctEl.textContent = Math.round(spendPctRaw*100)+'%';
+  gaugePctEl.style.color = spendPctRaw > 1 ? 'var(--red)' : 'var(--text)';
+
+  // Flanking instrument dials — days-to-payday (fills as the cycle elapses)
+  // and savings contributed this cycle (fills toward the savings budget).
+  const miniCirc = 188.5;
+  const paydayRing = document.getElementById('dialPaydayRing');
+  paydayRing.setAttribute('stroke-dasharray', miniCirc);
+  paydayRing.setAttribute('stroke-dashoffset', miniCirc - Math.min(pacePct,1)*miniCirc);
+  document.getElementById('dialPaydayNum').textContent = daysLeft;
 
   const savingsBudgetTotal = totalSavingsBudget();
-  document.getElementById('chipSaved').textContent = fmt(savingsContrib);
+  const savingsPct = savingsBudgetTotal>0 ? Math.min(savingsContrib/savingsBudgetTotal, 1) : (savingsContrib>0?1:0);
+  const savingsRing = document.getElementById('dialSavingsRing');
+  savingsRing.setAttribute('stroke-dasharray', miniCirc);
+  savingsRing.setAttribute('stroke-dashoffset', miniCirc - savingsPct*miniCirc);
+  document.getElementById('dialSavingsNum').textContent = fmt(savingsContrib);
 
   const budgetPct = budget>0 ? spent/budget : 0;
   const paceBadge = document.getElementById('paceBadge');
@@ -746,8 +746,7 @@ function renderDashboard(){
 
   const remainingBudget = Math.max(budget - spent, 0);
   document.getElementById('daysLeft').textContent = daysLeft;
-  setTextFlash('safeToday', fmt(remainingBudget/Math.max(daysLeft,1)));
-  document.getElementById('heroSubSpent').textContent = fmt(spent) + ' spent';
+  document.getElementById('safeToday').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
@@ -957,10 +956,10 @@ function renderCategoryList(){
     div.className = 'cat';
     div.innerHTML = `
       <div class="cat-top">
-        <div style="display:flex;align-items:center;gap:11px;">
-          <div class="cat-icon-circle" style="background:color-mix(in srgb, ${barColor(status)} 18%, transparent);box-shadow:0 0 10px color-mix(in srgb, ${barColor(status)} 35%, transparent);">${cat.icon ? escapeHtml(cat.icon) : '💳'}</div>
+        <div style="display:flex;align-items:center;">
+          <span class="status-light" style="background:${barColor(status)};box-shadow:0 0 6px ${barColor(status)};"></span>
           <div>
-            <div class="cat-name">${escapeHtml(cat.name)}</div>
+            <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
             <div class="cat-group">${escapeHtml(cat.group)}</div>
           </div>
         </div>
@@ -1014,11 +1013,8 @@ function renderTxRow(container, t, showDelete){
     </div>
     <div class="tx-row" style="cursor:pointer;">
       <div class="tx-left">
-        <div class="tx-icon-circle">${cat && cat.icon ? escapeHtml(cat.icon) : '💳'}</div>
-        <div class="tx-text">
-          <div class="tx-cat">${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
-          <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
-        </div>
+        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
+        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
       </div>
       <div style="display:flex;align-items:center;">
         <div class="tx-right">
@@ -1210,79 +1206,17 @@ function renderDebtTab(){
   }
 }
 
-function renderLoansTab(){
-  const loaned = totalLoaned(), repaid = totalLoanRepaid(), remaining = totalLoanRemaining();
-  document.getElementById('loanSummary').innerHTML = `
-    <div class="hist-card"><div class="v">${fmt(loaned)}</div><div class="l">Total lent</div></div>
-    <div class="hist-card"><div class="v">${fmt(repaid)}</div><div class="l">Repaid</div></div>
-    <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Still owed to you</div></div>
-  `;
-
-  const listWrap = document.getElementById('loanList');
-  document.getElementById('loanTag').textContent = state.loans.length + ' tracked';
-  if(!state.loans.length){
-    listWrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No money lent out tracked yet.</div>';
-  } else {
-    listWrap.innerHTML = '';
-    state.loans.forEach(loan=>{
-      const rem = remainingForLoan(loan);
-      const pct = loan.amount>0 ? Math.min(paidForLoan(loan.id)/loan.amount,1) : 0;
-      const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
-      const div = document.createElement('div');
-      div.className = 'debt-card';
-      div.innerHTML = `
-        <div class="debt-top">
-          <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(loan.borrower)}</div>
-          <div class="debt-amt">${rem<=0 ? '✅ Repaid in full' : fmt(rem)+' owed to you'}</div>
-        </div>
-        <div class="debt-reason">${escapeHtml(loan.reason)||'—'}</div>
-        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
-        <div class="debt-actions">
-          ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
-          <button class="debt-btn-del" data-del="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
-        </div>
-      `;
-      listWrap.appendChild(div);
-    });
-    listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
-    listWrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
-      const repaidAmt = paidForLoan(b.dataset.del);
-      const msg = repaidAmt>0
-        ? `${b.dataset.name} has ${fmt(repaidAmt)} in logged repayments. Deleting it keeps those as regular income entries, just no longer tied to this loan. Continue?`
-        : `Delete "${b.dataset.name}"? This can't be undone.`;
-      const ok = await askConfirm('Delete loan?', msg);
-      if(!ok) return;
-      state.loans = state.loans.filter(l=>l.id!==b.dataset.del);
-      saveState(); renderAll();
-      showToast('Loan deleted');
-    }));
-  }
-}
-
 document.getElementById('financeTabDebt').addEventListener('click', ()=>{
   document.getElementById('financeTabDebt').classList.add('active');
   document.getElementById('financeTabSavings').classList.remove('active');
-  document.getElementById('financeTabLoans').classList.remove('active');
   document.getElementById('financePanelDebt').style.display = '';
   document.getElementById('financePanelSavings').style.display = 'none';
-  document.getElementById('financePanelLoans').style.display = 'none';
 });
 document.getElementById('financeTabSavings').addEventListener('click', ()=>{
   document.getElementById('financeTabSavings').classList.add('active');
   document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financeTabLoans').classList.remove('active');
   document.getElementById('financePanelSavings').style.display = '';
   document.getElementById('financePanelDebt').style.display = 'none';
-  document.getElementById('financePanelLoans').style.display = 'none';
-});
-document.getElementById('financeTabLoans').addEventListener('click', ()=>{
-  document.getElementById('financeTabLoans').classList.add('active');
-  document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financeTabSavings').classList.remove('active');
-  document.getElementById('financePanelLoans').style.display = '';
-  document.getElementById('financePanelDebt').style.display = 'none';
-  document.getElementById('financePanelSavings').style.display = 'none';
 });
 document.getElementById('financeTabDebt').classList.add('active');
 
@@ -1304,20 +1238,6 @@ document.getElementById('addDebtBtn').addEventListener('click', ()=>{
   document.getElementById('newDebtAmount').value='';
   document.getElementById('newDebtInterest').value='';
   showToast('Debt added');
-});
-
-document.getElementById('addLoanBtn').addEventListener('click', ()=>{
-  const borrower = document.getElementById('newLoanBorrower').value.trim();
-  const reason = document.getElementById('newLoanReason').value.trim();
-  const amount = Number(document.getElementById('newLoanAmount').value);
-  if(!borrower){ showToast('Enter who you lent the money to'); return; }
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  state.loans.push({ id: 'loan-'+Date.now(), borrower, reason, amount });
-  saveState(); renderAll();
-  document.getElementById('newLoanBorrower').value='';
-  document.getElementById('newLoanReason').value='';
-  document.getElementById('newLoanAmount').value='';
-  showToast('Loan added');
 });
 
 const debtPaySheet = document.getElementById('debtPaySheet');
@@ -1346,36 +1266,6 @@ document.getElementById('debtPaySaveBtn').addEventListener('click', ()=>{
   saveState(); renderAll();
   closeSheetEl(debtPaySheet); activeSheet=null; payingDebtId=null;
   showToast('Payment logged');
-});
-
-const loanRepaySheet = document.getElementById('loanRepaySheet');
-let repayingLoanId = null;
-function openLoanRepaySheet(loanId){
-  repayingLoanId = loanId;
-  const loan = loanById(loanId);
-  document.getElementById('loanRepayTitle').textContent = 'Log repayment — ' + (loan ? loan.borrower : '');
-  document.getElementById('loanRepayAmount').value = '';
-  document.getElementById('loanRepayMethod').value = '';
-  document.getElementById('loanRepayDate').value = toDateInput(new Date());
-  activeSheet = loanRepaySheet; openSheetEl(loanRepaySheet);
-}
-document.getElementById('loanRepayCancelBtn').addEventListener('click', ()=>{ closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null; });
-document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('loanRepayAmount').value);
-  const method = document.getElementById('loanRepayMethod').value;
-  const date = document.getElementById('loanRepayDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  const loan = loanById(repayingLoanId);
-  // Repayments are money coming IN, so they live in extraIncome (not
-  // transactions) — tagged with loanId the same way a debt payment
-  // transaction is tagged with debtId.
-  state.extraIncome.push({
-    id: Date.now(), amount, source: (loan ? loan.borrower : 'Loan') + ' — repayment',
-    date, method, loanId: repayingLoanId
-  });
-  saveState(); renderAll();
-  closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null;
-  showToast('Repayment logged');
 });
 
 /* ============================================================
@@ -1736,7 +1626,6 @@ function renderAll(){
   renderDashboard();
   renderSavingsTab();
   renderDebtTab();
-  renderLoansTab();
   renderHistory();
   renderSettings();
   const sel = document.getElementById('txCategory');
