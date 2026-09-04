@@ -1,10 +1,10 @@
 // Budget Cockpit — service worker
 // Caches the app shell so it opens instantly and works offline.
 // Your actual budget data still needs a live connection to sync
-// with your backend (or Claude's storage) — this only caches the
-// app's own files, not your transactions.
+// with your backend — this only caches the app's own files, not
+// your transactions.
 
-const CACHE_NAME = 'budget-cockpit-v4';
+const CACHE_NAME = 'budget-cockpit-v5';
 const APP_SHELL = [
   './',
   './index.html',
@@ -16,7 +16,22 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) => {
+      // Previously used cache.addAll(), which is all-or-nothing: if a single
+      // file in APP_SHELL 404s (e.g. an icon that was never uploaded), the
+      // whole install silently fails and the service worker never activates
+      // — with no visible error, since register().catch() only catches
+      // failures in the registration call itself, not inside this promise.
+      // Caching each file independently means one missing icon can't take
+      // down offline support for the rest of the app.
+      return Promise.all(
+        APP_SHELL.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn('[sw] could not cache', url, err);
+          })
+        )
+      );
+    })
   );
   self.skipWaiting();
 });
@@ -32,9 +47,9 @@ self.addEventListener('activate', (event) => {
 
 // Network-first for the app's OWN files only, so the app shell loads fast
 // and works offline. Cross-origin requests (your Apps Script backend, the
-// AI assistant, quote API) are deliberately left alone — intercepting those
-// caused save/load failures, since opaque cross-origin responses don't
-// cache reliably and were breaking the fetch chain.
+// AI assistant, quote/FX APIs) are deliberately left alone — intercepting
+// those caused save/load failures, since opaque cross-origin responses
+// don't cache reliably and were breaking the fetch chain.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return; // never cache POST (saves/AI calls)
 
