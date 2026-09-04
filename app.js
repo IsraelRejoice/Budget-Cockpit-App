@@ -11,7 +11,6 @@ const DEFAULT_CATEGORIES = [
   {id:'health', name:'Health / Medical', group:'Needs', budget:0, threshold:0.90, icon:'🏥'},
   {id:'family', name:'Family support', group:'Needs', budget:0, threshold:0.90, icon:'👪'},
   {id:'debt', name:'Debt repayment', group:'Needs', budget:0, threshold:0.95, icon:'💳'},
-  {id:'loaned', name:'Money Lent Out', group:'Needs', budget:0, threshold:0.95, icon:'🤝'},
   {id:'care', name:'Personal care', group:'Wants', budget:0, threshold:0.85, icon:'🧴'},
   {id:'clothing', name:'Clothing', group:'Wants', budget:0, threshold:0.85, icon:'👕'},
   {id:'ent', name:'Entertainment', group:'Wants', budget:0, threshold:0.80, icon:'🎬'},
@@ -106,12 +105,10 @@ let state = {
   debts: [],              // {id, creditor, reason, amount, interestRate}
   debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
   debtFocusId: '',         // used when debtStrategy === 'manual'
-  loans: [],               // {id, borrower, reason, amount, dateLent} — money YOU lent to others
   aiHistory: [],           // {id, role:'user'|'bot', text, error?}
   personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
   bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
-  shares: [],               // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
-  dashboardInsightsExpanded: false // whether the collapsible "More insights" section on Dashboard is open
+  shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
 };
 
 const CURRENCY_OPTIONS = [
@@ -144,6 +141,12 @@ try{ sessionToken = localStorage.getItem(SESSION_KEY) || ''; }catch(e){ /* priva
 // isDirty = true means there are local changes not yet confirmed saved to
 // the backend (either never attempted, or the attempt failed/was offline).
 let isDirty = false;
+// While true, the debounced saveState() and the periodic trySyncNow() both
+// no-op instead of pushing to the backend. Used during restoreCycleFromHistory:
+// without this, a background sync landing in the gap between "POST restore"
+// and "GET fresh state" would push this browser's stale, pre-restore
+// transaction list and silently overwrite the just-restored data.
+let syncSuspended = false;
 function saveLocalMirror(){
   try{ localStorage.setItem(LOCAL_MIRROR_KEY, JSON.stringify({ state, dirty: isDirty, savedAt: Date.now() })); }catch(e){}
 }
@@ -215,27 +218,24 @@ async function loadState(){
 
   if(!state.paydayDay) state.paydayDay = 25;
   if(!state.savingsAccumulated) state.savingsAccumulated = {};
+  if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
   if(!state.debts) state.debts = [];
+  if(!state.loans) state.loans = [];
+  if(!state.loanPaidAccumulated) state.loanPaidAccumulated = {};
   if(!state.debtStrategy) state.debtStrategy = 'avalanche';
   if(state.debtFocusId == null) state.debtFocusId = '';
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
+  if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
+  if(!state.recurringTemplates) state.recurringTemplates = [];
   if(!state.currency) state.currency = '₦';
   if(!state.bills) state.bills = [];
   if(!state.shares) state.shares = [];
-  if(!state.loans) state.loans = [];
-  if(state.dashboardInsightsExpanded == null) state.dashboardInsightsExpanded = false;
-  state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; });
-  // Migration: accounts created before the "Money Lent Out" feature won't have
-  // this category in their backend sheet yet. Add it client-side on first load
-  // after the update — the next saveState() call writes it back to the sheet,
-  // so existing users get the feature without needing to re-run setupSheets().
-  if(!catById('loaned')){
-    state.categories.push({ id:'loaned', name:'Money Lent Out', group:'Needs', budget:0, threshold:0.95, icon:'🤝' });
-  }
+  state.categories.forEach(c=>{ if(c.group==='Savings' && c.goal==null) c.goal = 0; if(c.rollover==null) c.rollover = false; });
   refreshCycleDates();
 
   applyTheme(state.theme);
+  applyPrivacyModeUI();
   document.getElementById('personalNotesInput').value = state.personalNotes || '';
   renderAll();
   updateSyncIndicator();
@@ -257,6 +257,7 @@ function saveState(){
 
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    if(syncSuspended) return; // a restore is in flight — see restoreCycleFromHistory
     if(!API_URL){
       try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); isDirty = false; }
       catch(e){ /* stays dirty, harmless in the Claude-preview-only case */ }
@@ -266,7 +267,18 @@ function saveState(){
     if(!navigator.onLine){ return; } // stay queued — the 'online' listener retries automatically
     try{
       const data = await apiPost('saveState', {state});
-      if(data && !data.error){ isDirty = false; saveLocalMirror(); updateSyncIndicator(); }
+      if(data && !data.error){
+        isDirty = false;
+        if(data.conflictResolved && data.state){
+          // The backend auto-archived a cycle while this device was offline
+          // and had to filter our stale transactions out to protect History.
+          // Adopt its authoritative post-merge state instead of drifting.
+          state = Object.assign(state, data.state);
+          renderAll();
+          showToast('A cycle auto-archived while you were offline — synced up');
+        }
+        saveLocalMirror(); updateSyncIndicator();
+      }
     }catch(e){
       // still offline/unreachable — stays queued, no error shown (this is expected while offline)
     }
@@ -276,12 +288,18 @@ function saveState(){
 // Retries a queued save the moment connectivity returns, and periodically
 // while online in case a save silently failed for another reason.
 function trySyncNow(){
-  if(!API_URL || !navigator.onLine || !isDirty) return;
+  if(!API_URL || !navigator.onLine || !isDirty || syncSuspended) return;
   updateSyncIndicator();
   apiPost('saveState', {state}).then(data=>{
     if(data && !data.error){
       isDirty = false; saveLocalMirror(); updateSyncIndicator();
-      showToast('Back online — synced ✓');
+      if(data.conflictResolved && data.state){
+        state = Object.assign(state, data.state);
+        renderAll();
+        showToast('A cycle auto-archived while you were offline — synced up');
+      } else {
+        showToast('Back online — synced ✓');
+      }
     }
   }).catch(()=>{});
 }
@@ -310,6 +328,7 @@ function updateSyncIndicator(){
 function fmt(n){
   n = Math.round(n||0);
   const sym = state.currency || '₦';
+  if(privacyMode) return sym + '••••'; // fixed-length mask — doesn't leak magnitude via digit count
   return sym + n.toLocaleString('en-NG');
 }
 function catById(id){ return state.categories.find(c=>c.id===id); }
@@ -327,18 +346,33 @@ function totalSpent(){
 function savingsContribThisCycle(){
   return state.transactions.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
 }
-function totalBudget(){ return spendingCategories().reduce((s,c)=>s+Number(c.budget),0); }
+function totalBudget(){ return spendingCategories().reduce((s,c)=>s+effectiveBudget(c),0); }
 function totalSavingsBudget(){ return savingsCategories().reduce((s,c)=>s+Number(c.budget),0); }
 function extraTotal(){ return state.extraIncome.reduce((s,e)=>s+Number(e.amount),0); }
 function combinedIncome(){ return Number(state.income||0) + extraTotal(); }
 function lifetimeSaved(catId){ return (state.savingsAccumulated[catId]||0) + spentFor(catId); }
 
 function debtById(id){ return state.debts.find(d=>d.id===id); }
-function paidForDebt(debtId){ return state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0); }
+function paidForDebt(debtId){
+  const accumulated = (state.debtPaidAccumulated && state.debtPaidAccumulated[debtId]) || 0;
+  const liveThisCycle = state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0);
+  return accumulated + liveThisCycle;
+}
 function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
 function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
+
+function loanById(id){ return state.loans.find(l=>l.id===id); }
+function paidForLoan(loanId){
+  const accumulated = (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
+  const liveThisCycle = state.extraIncome.filter(x=>x.loanId===loanId).reduce((s,x)=>s+Number(x.amount),0);
+  return accumulated + liveThisCycle;
+}
+function remainingForLoan(loan){ return Math.max(Number(loan.amount) - paidForLoan(loan.id), 0); }
+function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
 function totalDebtPaid(){ return state.debts.reduce((s,d)=>s+paidForDebt(d.id),0); }
 function totalDebtRemaining(){ return Math.max(totalDebtOwed()-totalDebtPaid(),0); }
+function totalLoanRepaid(){ return state.loans.reduce((s,l)=>s+paidForLoan(l.id),0); }
+function totalLoanRemaining(){ return Math.max(totalLoaned()-totalLoanRepaid(),0); }
 function activeDebts(){ return state.debts.filter(d=>remainingForDebt(d)>0); }
 function suggestedFocusDebt(){
   const active = activeDebts();
@@ -347,20 +381,6 @@ function suggestedFocusDebt(){
   if(state.debtStrategy==='snowball') return active.slice().sort((a,b)=>remainingForDebt(a)-remainingForDebt(b))[0];
   return debtById(state.debtFocusId) || active[0];
 }
-
-/* ---- Loans (money YOU lent to others) — mirror of the Debt tracker above.
-   Lending is logged as a normal transaction under the 'loaned' category
-   (it's real cash leaving your account, so it counts as spending like
-   anything else). A repayment is logged as an Extra Income entry tagged
-   with loanRepaymentFor, so it flows through the existing income totals
-   automatically instead of needing a parallel accounting path. ---- */
-function loanById(id){ return state.loans.find(l=>l.id===id); }
-function repaidForLoan(loanId){ return state.extraIncome.filter(e=>e.loanRepaymentFor===loanId).reduce((s,e)=>s+Number(e.amount),0); }
-function remainingForLoan(loan){ return Math.max(Number(loan.amount) - repaidForLoan(loan.id), 0); }
-function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
-function totalLoanRepaid(){ return state.loans.reduce((s,l)=>s+repaidForLoan(l.id),0); }
-function totalLoanOutstanding(){ return Math.max(totalLoaned()-totalLoanRepaid(),0); }
-function activeLoans(){ return state.loans.filter(l=>remainingForLoan(l)>0); }
 
 function daysBetween(a,b){ return Math.round((b-a)/86400000); }
 function cyclePace(){
@@ -377,12 +397,38 @@ function escapeHtml(str){
   if(str==null) return '';
   return String(str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
-function showToast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2400);
+let toastTimer = null;
+let toastUndoCallback = null;
+function clearToastUndo(){
+  if(toastTimer){ clearTimeout(toastTimer); toastTimer = null; }
+  toastUndoCallback = null;
 }
+function showToast(msg){
+  clearToastUndo();
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  document.getElementById('toastUndoBtn').style.display = 'none';
+  t.classList.add('show');
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+// Same as showToast, but with a tappable Undo button that runs onUndo and
+// stays up for 6s (vs the usual 2.4s) so there's real time to catch a
+// mistaken delete.
+function showUndoToast(msg, onUndo){
+  clearToastUndo();
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  const btn = document.getElementById('toastUndoBtn');
+  btn.style.display = '';
+  toastUndoCallback = onUndo;
+  t.classList.add('show');
+  toastTimer = setTimeout(()=>{ t.classList.remove('show'); clearToastUndo(); }, 6000);
+}
+document.getElementById('toastUndoBtn').addEventListener('click', ()=>{
+  if(toastUndoCallback) toastUndoCallback();
+  document.getElementById('toast').classList.remove('show');
+  clearToastUndo();
+});
 // Updates an element's text and gives it a brief gold flash — but only
 // when the value actually changed, so it never flashes on every render.
 function setTextFlash(id, newText){
@@ -450,12 +496,88 @@ function updatePaydayCard(){
   const secs = totalSec%60;
   cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
 }
+let privacyMode = false;
+try{ privacyMode = localStorage.getItem('privacyMode') === '1'; }catch(e){}
+let txSearchTerm = '';
+function applyPrivacyModeUI(){
+  const btn = document.getElementById('privacyToggleBtn');
+  if(!btn) return;
+  btn.textContent = privacyMode ? '🙈' : '👁️';
+  btn.title = privacyMode ? 'Show figures' : 'Hide figures (privacy mode)';
+  btn.classList.toggle('privacy-active', privacyMode);
+  document.body.classList.toggle('privacy-on', privacyMode);
+}
+document.getElementById('privacyToggleBtn').addEventListener('click', ()=>{
+  privacyMode = !privacyMode;
+  try{ localStorage.setItem('privacyMode', privacyMode ? '1' : '0'); }catch(e){}
+  applyPrivacyModeUI();
+  renderAll(); // fmt() checks privacyMode directly, so every figure app-wide updates in one pass
+});
+
+let clockStyle = 'digital';
+try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
+const CLOCK_THEMES = ['classic','amber','teal','mono'];
+let clockTheme = 'classic';
+try{ clockTheme = localStorage.getItem('clockTheme') || 'classic'; }catch(e){}
+
+function applyClockThemeUI(){
+  const analog = document.getElementById('analogClockFace');
+  if(!analog) return;
+  CLOCK_THEMES.forEach(t => analog.classList.remove('theme-' + t));
+  if(clockTheme !== 'classic') analog.classList.add('theme-' + clockTheme);
+}
+document.getElementById('clockThemeBtn').addEventListener('click', ()=>{
+  const idx = CLOCK_THEMES.indexOf(clockTheme);
+  clockTheme = CLOCK_THEMES[(idx + 1) % CLOCK_THEMES.length];
+  try{ localStorage.setItem('clockTheme', clockTheme); }catch(e){}
+  applyClockThemeUI();
+  showToast('Clock theme: ' + clockTheme[0].toUpperCase() + clockTheme.slice(1));
+});
+
+function applyClockStyleUI(){
+  const analog = document.getElementById('analogClockFace');
+  const btn = document.getElementById('clockStyleBtn');
+  const themeBtn = document.getElementById('clockThemeBtn');
+  if(!analog || !btn) return;
+  if(clockStyle === 'analog'){
+    analog.style.display = '';
+    btn.textContent = '🔢';
+    btn.title = 'Switch to digital clock';
+    if(themeBtn) themeBtn.style.display = '';
+  } else {
+    analog.style.display = 'none';
+    btn.textContent = '🕐';
+    btn.title = 'Switch to analog clock';
+    if(themeBtn) themeBtn.style.display = 'none';
+  }
+  applyClockThemeUI();
+}
+document.getElementById('clockStyleBtn').addEventListener('click', ()=>{
+  clockStyle = clockStyle === 'digital' ? 'analog' : 'digital';
+  try{ localStorage.setItem('clockStyle', clockStyle); }catch(e){}
+  applyClockStyleUI();
+});
+
 function startClock(){
+  applyClockStyleUI();
   function tick(){
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
-    const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
+    if(clockStyle === 'analog'){
+      document.getElementById('liveClock').textContent = dateStr;
+      const hours = now.getHours() % 12;
+      const mins = now.getMinutes();
+      const secs = now.getSeconds();
+      const hourDeg = (hours + mins/60) * 30;
+      const minDeg = (mins + secs/60) * 6;
+      const secDeg = secs * 6;
+      document.getElementById('clockHandHour').setAttribute('transform', 'rotate(' + hourDeg + ' 20 20)');
+      document.getElementById('clockHandMinute').setAttribute('transform', 'rotate(' + minDeg + ' 20 20)');
+      document.getElementById('clockHandSecond').setAttribute('transform', 'rotate(' + secDeg + ' 20 20)');
+    } else {
+      const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      document.getElementById('liveClock').textContent = dateStr + ' · ' + timeStr;
+    }
     updatePaydayCard();
   }
   tick();
@@ -507,14 +629,33 @@ document.getElementById('refreshQuoteBtn').addEventListener('click', randomLocal
 /* ============================================================
    STATUS LOGIC
    ============================================================ */
+// Rollover: when a category has "carry over unused budget" enabled, any
+// amount left unspent last cycle is added on top of this cycle's budget.
+// Approximation: uses the category's CURRENT budget as a stand-in for what
+// it was last cycle, since History only stores aggregate totals + the raw
+// transaction list, not a per-category budget snapshot. Fine in practice
+// since budgets rarely change cycle to cycle — but if you just changed
+// this category's budget, the rollover amount reflects the new figure,
+// not the one that was actually in effect last cycle.
+function rolloverAmount(cat){
+  if(!cat.rollover || cat.group==='Savings') return 0;
+  if(!state.history || !state.history.length) return 0;
+  const last = state.history[state.history.length-1];
+  const lastSpent = (last.transactions||[]).filter(t=>t.categoryId===cat.id).reduce((s,t)=>s+Number(t.amount),0);
+  return Math.max(0, Number(cat.budget) - lastSpent);
+}
+function effectiveBudget(cat){
+  return Number(cat.budget) + rolloverAmount(cat);
+}
 function statusForAmt(cat, s){
+  const budget = effectiveBudget(cat);
   if(cat.threshold==null){
-    if(cat.budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
-    return s>=cat.budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
+    if(budget<=0) return { label: s>0 ? '✅ Target met' : 'In progress', cls:'st-target' };
+    return s>=budget ? {label:'✅ Target met', cls:'st-target'} : {label:'In progress', cls:'st-target'};
   }
-  if(cat.budget<=0) return s>0 ? {label:'OVER BUDGET', cls:'st-over'} : {label:'No budget set', cls:'st-target'};
-  if(s>cat.budget) return {label:'OVER BUDGET', cls:'st-over'};
-  if(s/cat.budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
+  if(budget<=0) return s>0 ? {label:'OVER BUDGET', cls:'st-over'} : {label:'No budget set', cls:'st-target'};
+  if(s>budget) return {label:'OVER BUDGET', cls:'st-over'};
+  if(s/budget >= cat.threshold) return {label:'NEAR LIMIT', cls:'st-near'};
   return {label:'On track', cls:'st-ok'};
 }
 function statusFor(cat){ return statusForAmt(cat, spentFor(cat.id)); }
@@ -523,6 +664,21 @@ function barColor(status){
   if(status.cls==='st-near') return 'var(--amber)';
   if(status.cls==='st-target') return 'var(--muted-2)';
   return 'var(--teal)';
+}
+
+// Reusable small instrument dial — used on Savings and Debt cards so
+// goal/payoff progress reads the same "instrument readout" way the
+// Dashboard gauge cluster does, instead of a plain linear bar.
+function miniDialSVG(pct, colorVar, size){
+  size = size || 48;
+  const r = (size/2) - 4;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - Math.min(Math.max(pct,0),1) * circ;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);flex:none;">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${colorVar}" stroke-width="4"
+      stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}" stroke-linecap="round"/>
+  </svg>`;
 }
 
 /* ============================================================
@@ -566,18 +722,20 @@ function renderDashboard(){
   const spendPct = Math.min(spendPctRaw, 1);
   const { daysLeft, pacePct } = cyclePace();
 
-  const spendCirc = 276.46, paceCirc = 351.86;
-  const spendEl = document.getElementById('gaugeSpend');
-  const paceEl = document.getElementById('gaugePace');
-  spendEl.setAttribute('stroke-dasharray', spendCirc);
-  spendEl.setAttribute('stroke-dashoffset', spendCirc - spendPct*spendCirc);
-  spendEl.style.stroke = spendPctRaw > 1 ? 'var(--red)' : 'var(--teal)';
-  paceEl.setAttribute('stroke-dasharray', paceCirc);
-  paceEl.setAttribute('stroke-dashoffset', paceCirc - Math.min(pacePct,1)*paceCirc);
+  // Hero card bar: simple width-based fill (budget-vs-spent), replacing the
+  // old circular dial cluster — more compact, reads at a glance like a
+  // standard balance/spend bar rather than an instrument dial.
+  const budgetPctForBar = budget>0 ? Math.min(spent/budget, 1) : (spent>0?1:0);
+  const heroBar = document.getElementById('heroBarFill');
+  heroBar.style.width = (budgetPctForBar*100) + '%';
+  heroBar.style.background = spent > budget && budget>0 ? 'var(--red)' : 'var(--teal)';
 
   const gaugePctEl = document.getElementById('gaugePct');
-  gaugePctEl.textContent = Math.round(spendPctRaw*100)+'%';
-  gaugePctEl.style.color = spendPctRaw > 1 ? 'var(--red)' : 'var(--text)';
+  gaugePctEl.textContent = (budget>0 ? Math.round((spent/budget)*100) : 0)+'% of budget';
+  gaugePctEl.style.color = (budget>0 && spent>budget) ? 'var(--red)' : 'var(--muted)';
+
+  const savingsBudgetTotal = totalSavingsBudget();
+  document.getElementById('chipSaved').textContent = fmt(savingsContrib);
 
   const budgetPct = budget>0 ? spent/budget : 0;
   const paceBadge = document.getElementById('paceBadge');
@@ -588,11 +746,12 @@ function renderDashboard(){
 
   const remainingBudget = Math.max(budget - spent, 0);
   document.getElementById('daysLeft').textContent = daysLeft;
-  document.getElementById('safeToday').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
+  setTextFlash('safeToday', fmt(remainingBudget/Math.max(daysLeft,1)));
+  document.getElementById('heroSubSpent').textContent = fmt(spent) + ' spent';
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
-  document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
+  document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 && !privacyMode ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
   bc.classList.toggle('over', income>0 && grandTotal > income);
 
   let alerts = 0;
@@ -604,6 +763,7 @@ function renderDashboard(){
   renderTxPreview();
   renderStreakAndBadges();
   renderWeekdayChart();
+  renderTrendChart();
   renderBillReminders();
 }
 
@@ -667,9 +827,9 @@ function renderWeekdayChart(){
   totals.forEach((v,i)=>{
     const barH = (v/max) * (h-pad*2);
     const x = pad + i*((w-pad*2)/7) + 3;
-    ctx.fillStyle = i===highestIdx && v>0 ? '#E8B14C' : '#3FC7B0';
+    ctx.fillStyle = i===highestIdx && v>0 ? '#FFC24D' : '#00E5C7';
     ctx.fillRect(x, h-pad-barH, barW, Math.max(barH,1));
-    ctx.fillStyle = '#8892A6'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle = '#7B8494'; ctx.font='9px sans-serif'; ctx.textAlign='center';
     ctx.fillText(labels[i], x+barW/2, h-4);
   });
   ctx.textAlign = 'left';
@@ -677,6 +837,51 @@ function renderWeekdayChart(){
   if(label){
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     label.textContent = totals[highestIdx]>0 ? 'You spend most on ' + dayNames[highestIdx] + 's' : 'Log a few expenses to see your pattern';
+  }
+}
+
+/* ============================================================
+   MULTI-CYCLE SPENDING TREND CHART — complements the detailed
+   income-vs-spent bar comparison already on the History tab with a
+   quick-glance line of spend-only trend, visible right from Dashboard.
+   ============================================================ */
+function renderTrendChart(){
+  const canvas = document.getElementById('trendCanvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const cycles = [...state.history, {label: cycleLabelText(), totalSpent: totalSpent()}].slice(-8);
+  const note = document.getElementById('trendNote');
+  if(cycles.length < 2){
+    if(note) note.textContent = 'Archive a couple more cycles to see a trend';
+    return;
+  }
+  const w = canvas.width, h = canvas.height, pad = 18;
+  const max = Math.max(...cycles.map(c=>c.totalSpent), 1);
+  const stepX = (w - pad*2) / (cycles.length - 1);
+  ctx.strokeStyle = '#00E5C7'; ctx.lineWidth = 2; ctx.beginPath();
+  cycles.forEach((c,i)=>{
+    const x = pad + i*stepX;
+    const y = h - pad - (c.totalSpent/max) * (h - pad*2);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  cycles.forEach((c,i)=>{
+    const x = pad + i*stepX;
+    const y = h - pad - (c.totalSpent/max) * (h - pad*2);
+    const isLast = i === cycles.length - 1;
+    ctx.fillStyle = isLast ? '#FFC24D' : '#00E5C7';
+    ctx.beginPath(); ctx.arc(x, y, isLast ? 3.5 : 2.5, 0, Math.PI*2); ctx.fill();
+  });
+  if(note){
+    const first = cycles[0].totalSpent, last = cycles[cycles.length-1].totalSpent;
+    if(first > 0){
+      const pctChange = Math.round(((last-first)/first)*100);
+      note.textContent = pctChange===0 ? 'Steady across the last ' + cycles.length + ' cycles'
+        : (pctChange>0 ? '↑ ' : '↓ ') + Math.abs(pctChange) + '% vs ' + cycles.length + ' cycles ago';
+    } else {
+      note.textContent = 'Spending trend over the last ' + cycles.length + ' cycles';
+    }
   }
 }
 
@@ -743,17 +948,23 @@ function renderCategoryList(){
   document.getElementById('catTag').textContent = cats.length + ' tracked';
   cats.forEach(cat=>{
     const spent = spentFor(cat.id);
-    const pct = cat.budget>0 ? Math.min(spent/cat.budget,1) : (spent>0?1:0);
+    const budget = effectiveBudget(cat);
+    const rollover = rolloverAmount(cat);
+    const pct = budget>0 ? Math.min(spent/budget,1) : (spent>0?1:0);
     const status = statusFor(cat);
+    const rolloverNote = rollover>0 ? ` <span style="color:var(--teal);">(+${fmt(rollover)} rollover)</span>` : '';
     const div = document.createElement('div');
     div.className = 'cat';
     div.innerHTML = `
       <div class="cat-top">
-        <div>
-          <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
-          <div class="cat-group">${escapeHtml(cat.group)}</div>
+        <div style="display:flex;align-items:center;gap:11px;">
+          <div class="cat-icon-circle" style="background:color-mix(in srgb, ${barColor(status)} 18%, transparent);box-shadow:0 0 10px color-mix(in srgb, ${barColor(status)} 35%, transparent);">${cat.icon ? escapeHtml(cat.icon) : '💳'}</div>
+          <div>
+            <div class="cat-name">${escapeHtml(cat.name)}</div>
+            <div class="cat-group">${escapeHtml(cat.group)}</div>
+          </div>
         </div>
-        <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(cat.budget)}</div>
+        <div class="cat-amt"><b>${fmt(spent)}</b><br>/ ${fmt(budget)}${rolloverNote}</div>
       </div>
       <div class="bar-track">
         <div class="bar-fill" style="width:${pct*100}%; background:${barColor(status)};"></div>
@@ -761,7 +972,7 @@ function renderCategoryList(){
       </div>
       <div class="status-row">
         <span class="status-badge ${status.cls}">${status.label}</span>
-        <span style="font-size:10px;color:var(--muted);">${cat.budget>0?Math.round(pct*100):0}% used</span>
+        <span style="font-size:10px;color:var(--muted);">${budget>0?Math.round(pct*100):0}% used</span>
       </div>
     `;
     list.appendChild(div);
@@ -776,10 +987,22 @@ function renderTxPreview(){
   sorted.forEach(t=>renderTxRow(wrap, t, true));
 }
 
+function deleteTxWithUndo(t){
+  const idx = state.transactions.findIndex(x=>x.id===t.id);
+  if(idx===-1) return;
+  const removed = state.transactions[idx];
+  state.transactions = state.transactions.filter(x=>x.id!==t.id);
+  saveState(); renderAll();
+  showUndoToast('Expense removed', ()=>{
+    state.transactions.splice(Math.min(idx, state.transactions.length), 0, removed);
+    saveState(); renderAll();
+  });
+}
+
 function renderTxRow(container, t, showDelete){
   const cat = catById(t.categoryId);
   const savingsTag = cat && cat.group==='Savings' ? '<span class="tx-tag-savings">SAVINGS</span>' : '';
-  const loanTag = t.loanId ? '<span class="tx-tag-loan">LENT</span>' : (t.debtId ? '<span class="tx-tag-loan">DEBT</span>' : '');
+  const recurTag = t.recurTemplateId ? ' 🔁' : '';
   const methodTag = t.method ? ' · ' + escapeHtml(t.method) : '';
 
   const wrap = document.createElement('div');
@@ -791,8 +1014,11 @@ function renderTxRow(container, t, showDelete){
     </div>
     <div class="tx-row" style="cursor:pointer;">
       <div class="tx-left">
-        <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${loanTag}</div>
-        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
+        <div class="tx-icon-circle">${cat && cat.icon ? escapeHtml(cat.icon) : '💳'}</div>
+        <div class="tx-text">
+          <div class="tx-cat">${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
+          <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
+        </div>
       </div>
       <div style="display:flex;align-items:center;">
         <div class="tx-right">
@@ -818,16 +1044,12 @@ function renderTxRow(container, t, showDelete){
   if(showDelete){
     row.querySelector('.tx-del').addEventListener('click', (e)=>{
       e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
+      deleteTxWithUndo(t);
     });
     const delBtn = wrap.querySelector('.tx-swipe-del');
     if(delBtn) delBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      state.transactions = state.transactions.filter(x=>x.id!==t.id);
-      saveState(); renderAll();
-      showToast('Expense removed');
+      deleteTxWithUndo(t);
     });
   }
   attachSwipe(row);
@@ -881,15 +1103,17 @@ function renderSavingsTab(){
     const div = document.createElement('div');
     div.className = 'save-card';
     div.innerHTML = `
-      <div class="save-top">
-        <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
-        <div class="save-amt">${fmt(total)}</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        ${goal>0 ? `<div style="position:relative;flex:none;">${miniDialSVG(pct,'var(--teal)',48)}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;">${Math.round(pct*100)}%</div></div>` : ''}
+        <div style="flex:1;min-width:0;">
+          <div class="save-top">
+            <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
+            <div class="save-amt">${fmt(total)}</div>
+          </div>
+          <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
+        </div>
       </div>
-      <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
-      ${goal>0 ? `
-        <div class="save-bar-track"><div class="save-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="save-foot"><span>${Math.round(pct*100)}% of goal</span><span>Goal: ${fmt(goal)}</span></div>
-      ` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
+      ${goal>0 ? `<div class="save-foot" style="margin-top:8px;"><span>Goal: ${fmt(goal)}</span></div>` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
     `;
     wrap.appendChild(div);
   });
@@ -923,10 +1147,14 @@ function renderDebtTab(){
     focusWrap.innerHTML = `
       <div class="debt-focus-card">
         <div class="focus-badge">CURRENTLY SERVICING</div>
-        <div class="debt-top"><div class="debt-name">${escapeHtml(focus.creditor)}</div><div class="debt-amt">${fmt(rem)} left</div></div>
-        <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
-        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% paid off</span><span>Owed: ${fmt(focus.amount)}</span></div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="position:relative;flex:none;">${miniDialSVG(pct,'var(--gold)',56)}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;">${Math.round(pct*100)}%</div></div>
+          <div style="flex:1;min-width:0;">
+            <div class="debt-top" style="margin-bottom:0;"><div class="debt-name">${escapeHtml(focus.creditor)}</div><div class="debt-amt">${fmt(rem)} left</div></div>
+            <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
+          </div>
+        </div>
+        <div class="debt-foot" style="margin-top:10px;"><span>Owed: ${fmt(focus.amount)}</span></div>
         <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px;">${why}</p>
         <button class="btn btn-teal" style="margin:0;" data-debtpay="${focus.id}">Log a payment</button>
       </div>
@@ -944,11 +1172,12 @@ function renderDebtTab(){
       const rem = remainingForDebt(debt);
       const pct = debt.amount>0 ? Math.min(paidForDebt(debt.id)/debt.amount,1) : 0;
       const isFocused = focus && focus.id===debt.id;
+      const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
       const div = document.createElement('div');
       div.className = 'debt-card' + (isFocused ? ' focused' : '');
       div.innerHTML = `
         <div class="debt-top">
-          <div class="debt-name">${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
+          <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
           <div class="debt-amt">${rem<=0 ? '✅ Cleared' : fmt(rem)+' left'}</div>
         </div>
         <div class="debt-reason">${escapeHtml(debt.reason)||'—'}${debt.interestRate ? ' · '+debt.interestRate+'%/yr' : ''}</div>
@@ -982,129 +1211,78 @@ function renderDebtTab(){
 }
 
 function renderLoansTab(){
-  const owed = totalLoaned(), repaid = totalLoanRepaid(), outstanding = totalLoanOutstanding();
+  const loaned = totalLoaned(), repaid = totalLoanRepaid(), remaining = totalLoanRemaining();
   document.getElementById('loanSummary').innerHTML = `
-    <div class="hist-card"><div class="v">${fmt(owed)}</div><div class="l">Total lent</div></div>
-    <div class="hist-card"><div class="v">${fmt(repaid)}</div><div class="l">Total repaid</div></div>
-    <div class="hist-card"><div class="v">${fmt(outstanding)}</div><div class="l">Outstanding</div></div>
+    <div class="hist-card"><div class="v">${fmt(loaned)}</div><div class="l">Total lent</div></div>
+    <div class="hist-card"><div class="v">${fmt(repaid)}</div><div class="l">Repaid</div></div>
+    <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Still owed to you</div></div>
   `;
 
   const listWrap = document.getElementById('loanList');
   document.getElementById('loanTag').textContent = state.loans.length + ' tracked';
   if(!state.loans.length){
-    listWrap.innerHTML = '<div class="loan-empty">No loans logged yet — use the form below whenever you lend a friend or family member money.</div>';
-    return;
+    listWrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No money lent out tracked yet.</div>';
+  } else {
+    listWrap.innerHTML = '';
+    state.loans.forEach(loan=>{
+      const rem = remainingForLoan(loan);
+      const pct = loan.amount>0 ? Math.min(paidForLoan(loan.id)/loan.amount,1) : 0;
+      const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
+      const div = document.createElement('div');
+      div.className = 'debt-card';
+      div.innerHTML = `
+        <div class="debt-top">
+          <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(loan.borrower)}</div>
+          <div class="debt-amt">${rem<=0 ? '✅ Repaid in full' : fmt(rem)+' owed to you'}</div>
+        </div>
+        <div class="debt-reason">${escapeHtml(loan.reason)||'—'}</div>
+        <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
+        <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
+        <div class="debt-actions">
+          ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
+          <button class="debt-btn-del" data-del="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
+        </div>
+      `;
+      listWrap.appendChild(div);
+    });
+    listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
+    listWrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+      const repaidAmt = paidForLoan(b.dataset.del);
+      const msg = repaidAmt>0
+        ? `${b.dataset.name} has ${fmt(repaidAmt)} in logged repayments. Deleting it keeps those as regular income entries, just no longer tied to this loan. Continue?`
+        : `Delete "${b.dataset.name}"? This can't be undone.`;
+      const ok = await askConfirm('Delete loan?', msg);
+      if(!ok) return;
+      state.loans = state.loans.filter(l=>l.id!==b.dataset.del);
+      saveState(); renderAll();
+      showToast('Loan deleted');
+    }));
   }
-  listWrap.innerHTML = '';
-  [...state.loans].sort((a,b)=> (b.dateLent||'').localeCompare(a.dateLent||'')).forEach(loan=>{
-    const rem = remainingForLoan(loan);
-    const pct = loan.amount>0 ? Math.min(repaidForLoan(loan.id)/loan.amount,1) : 0;
-    const div = document.createElement('div');
-    div.className = 'loan-card';
-    div.innerHTML = `
-      <div class="loan-top">
-        <div class="loan-name">${escapeHtml(loan.borrower)}</div>
-        <div class="loan-amt">${rem<=0 ? '✅ Repaid in full' : fmt(rem)+' owed to you'}</div>
-      </div>
-      <div class="loan-reason">${escapeHtml(loan.reason)||'—'} ${loan.dateLent ? '· lent '+loan.dateLent : ''}</div>
-      <div class="loan-bar-track"><div class="loan-bar-fill" style="width:${pct*100}%;"></div></div>
-      <div class="loan-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
-      <div class="loan-actions">
-        ${rem>0 ? `<button class="loan-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
-        <button class="loan-btn-del" data-del="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
-      </div>
-    `;
-    listWrap.appendChild(div);
-  });
-  listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
-  listWrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
-    const repaidAmt = repaidForLoan(b.dataset.del);
-    const msg = repaidAmt>0
-      ? `${b.dataset.name} has ${fmt(repaidAmt)} in logged repayments. Deleting this loan keeps the original loan amount as a regular "Money Lent Out" expense and the repayments as regular extra income — they just won't be linked to this loan anymore. Continue?`
-      : `Delete this loan to ${b.dataset.name}? This can't be undone.`;
-    const ok = await askConfirm('Delete loan?', msg);
-    if(!ok) return;
-    state.loans = state.loans.filter(l=>l.id!==b.dataset.del);
-    saveState(); renderAll();
-    showToast('Loan deleted');
-  }));
 }
-
-document.getElementById('addLoanBtn').addEventListener('click', ()=>{
-  const borrower = document.getElementById('newLoanBorrower').value.trim();
-  const reason = document.getElementById('newLoanReason').value.trim();
-  const amount = Number(document.getElementById('newLoanAmount').value);
-  const dateLent = document.getElementById('newLoanDate').value || toDateInput(new Date());
-  if(!borrower){ showToast('Enter who you lent the money to'); return; }
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  const loanId = 'loan-'+Date.now();
-  state.loans.push({ id: loanId, borrower, reason, amount, dateLent });
-  // Lending money is a real cash outflow this cycle, so it's logged as an
-  // ordinary expense under "Money Lent Out" — same pattern as debt payments
-  // logging under "Debt repayment".
-  state.transactions.push({
-    id: Date.now(), amount, categoryId: 'loaned',
-    desc: borrower + ' — money lent' + (reason ? ' (' + reason + ')' : ''),
-    date: dateLent, method: '', loanId
-  });
-  saveState(); renderAll();
-  document.getElementById('newLoanBorrower').value='';
-  document.getElementById('newLoanReason').value='';
-  document.getElementById('newLoanAmount').value='';
-  document.getElementById('newLoanDate').value='';
-  showToast('Loan logged');
-});
-
-const loanRepaySheet = document.getElementById('loanRepaySheet');
-let repayingLoanId = null;
-function openLoanRepaySheet(loanId){
-  repayingLoanId = loanId;
-  const loan = loanById(loanId);
-  document.getElementById('loanRepayTitle').textContent = 'Log repayment — ' + (loan ? loan.borrower : '');
-  document.getElementById('loanRepayAmount').value = '';
-  document.getElementById('loanRepayDate').value = toDateInput(new Date());
-  activeSheet = loanRepaySheet; openSheetEl(loanRepaySheet);
-}
-document.getElementById('loanRepayCancelBtn').addEventListener('click', ()=>{ closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null; });
-document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('loanRepayAmount').value);
-  const date = document.getElementById('loanRepayDate').value || toDateInput(new Date());
-  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  const loan = loanById(repayingLoanId);
-  state.extraIncome.push({
-    id: Date.now(),
-    source: 'Loan repayment — ' + (loan ? loan.borrower : ''),
-    amount, date,
-    loanRepaymentFor: repayingLoanId
-  });
-  saveState(); renderAll();
-  closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null;
-  showToast('Repayment logged — added to extra income');
-});
 
 document.getElementById('financeTabDebt').addEventListener('click', ()=>{
   document.getElementById('financeTabDebt').classList.add('active');
-  document.getElementById('financeTabLent').classList.remove('active');
   document.getElementById('financeTabSavings').classList.remove('active');
+  document.getElementById('financeTabLoans').classList.remove('active');
   document.getElementById('financePanelDebt').style.display = '';
-  document.getElementById('financePanelLent').style.display = 'none';
   document.getElementById('financePanelSavings').style.display = 'none';
-});
-document.getElementById('financeTabLent').addEventListener('click', ()=>{
-  document.getElementById('financeTabLent').classList.add('active');
-  document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financeTabSavings').classList.remove('active');
-  document.getElementById('financePanelLent').style.display = '';
-  document.getElementById('financePanelDebt').style.display = 'none';
-  document.getElementById('financePanelSavings').style.display = 'none';
+  document.getElementById('financePanelLoans').style.display = 'none';
 });
 document.getElementById('financeTabSavings').addEventListener('click', ()=>{
   document.getElementById('financeTabSavings').classList.add('active');
   document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financeTabLent').classList.remove('active');
+  document.getElementById('financeTabLoans').classList.remove('active');
   document.getElementById('financePanelSavings').style.display = '';
   document.getElementById('financePanelDebt').style.display = 'none';
-  document.getElementById('financePanelLent').style.display = 'none';
+  document.getElementById('financePanelLoans').style.display = 'none';
+});
+document.getElementById('financeTabLoans').addEventListener('click', ()=>{
+  document.getElementById('financeTabLoans').classList.add('active');
+  document.getElementById('financeTabDebt').classList.remove('active');
+  document.getElementById('financeTabSavings').classList.remove('active');
+  document.getElementById('financePanelLoans').style.display = '';
+  document.getElementById('financePanelDebt').style.display = 'none';
+  document.getElementById('financePanelSavings').style.display = 'none';
 });
 document.getElementById('financeTabDebt').classList.add('active');
 
@@ -1126,6 +1304,20 @@ document.getElementById('addDebtBtn').addEventListener('click', ()=>{
   document.getElementById('newDebtAmount').value='';
   document.getElementById('newDebtInterest').value='';
   showToast('Debt added');
+});
+
+document.getElementById('addLoanBtn').addEventListener('click', ()=>{
+  const borrower = document.getElementById('newLoanBorrower').value.trim();
+  const reason = document.getElementById('newLoanReason').value.trim();
+  const amount = Number(document.getElementById('newLoanAmount').value);
+  if(!borrower){ showToast('Enter who you lent the money to'); return; }
+  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  state.loans.push({ id: 'loan-'+Date.now(), borrower, reason, amount });
+  saveState(); renderAll();
+  document.getElementById('newLoanBorrower').value='';
+  document.getElementById('newLoanReason').value='';
+  document.getElementById('newLoanAmount').value='';
+  showToast('Loan added');
 });
 
 const debtPaySheet = document.getElementById('debtPaySheet');
@@ -1154,6 +1346,36 @@ document.getElementById('debtPaySaveBtn').addEventListener('click', ()=>{
   saveState(); renderAll();
   closeSheetEl(debtPaySheet); activeSheet=null; payingDebtId=null;
   showToast('Payment logged');
+});
+
+const loanRepaySheet = document.getElementById('loanRepaySheet');
+let repayingLoanId = null;
+function openLoanRepaySheet(loanId){
+  repayingLoanId = loanId;
+  const loan = loanById(loanId);
+  document.getElementById('loanRepayTitle').textContent = 'Log repayment — ' + (loan ? loan.borrower : '');
+  document.getElementById('loanRepayAmount').value = '';
+  document.getElementById('loanRepayMethod').value = '';
+  document.getElementById('loanRepayDate').value = toDateInput(new Date());
+  activeSheet = loanRepaySheet; openSheetEl(loanRepaySheet);
+}
+document.getElementById('loanRepayCancelBtn').addEventListener('click', ()=>{ closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null; });
+document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
+  const amount = Number(document.getElementById('loanRepayAmount').value);
+  const method = document.getElementById('loanRepayMethod').value;
+  const date = document.getElementById('loanRepayDate').value || toDateInput(new Date());
+  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  const loan = loanById(repayingLoanId);
+  // Repayments are money coming IN, so they live in extraIncome (not
+  // transactions) — tagged with loanId the same way a debt payment
+  // transaction is tagged with debtId.
+  state.extraIncome.push({
+    id: Date.now(), amount, source: (loan ? loan.borrower : 'Loan') + ' — repayment',
+    date, method, loanId: repayingLoanId
+  });
+  saveState(); renderAll();
+  closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null;
+  showToast('Repayment logged');
 });
 
 /* ============================================================
@@ -1201,9 +1423,18 @@ function renderHistory(){
   }
 
   const txWrap = document.getElementById('txListFull');
-  const sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
-  document.getElementById('txTagFull').textContent = sorted.length + ' logged';
-  txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">No expenses logged this cycle yet.</div>';
+  const term = (txSearchTerm || '').trim().toLowerCase();
+  let sorted = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id-a.id);
+  if(term){
+    sorted = sorted.filter(t=>{
+      const cat = catById(t.categoryId);
+      return (t.desc||'').toLowerCase().includes(term) || (cat && cat.name.toLowerCase().includes(term));
+    });
+    document.getElementById('txTagFull').textContent = sorted.length + ' match' + (sorted.length===1?'':'es');
+  } else {
+    document.getElementById('txTagFull').textContent = sorted.length + ' logged';
+  }
+  txWrap.innerHTML = sorted.length ? '' : '<div class="empty-hist">' + (term ? 'No transactions match "' + escapeHtml(txSearchTerm) + '".' : 'No expenses logged this cycle yet.') + '</div>';
   sorted.forEach(t=>renderTxRow(txWrap, t, true));
 
   renderPastCycles();
@@ -1223,11 +1454,46 @@ function renderPastCycles(){
         <div class="tx-cat">${escapeHtml(h.label)}</div>
         <div class="tx-desc">Income ${fmt(h.income)} · Spent ${fmt(h.totalSpent)}</div>
       </div>
-      <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
+      <button class="btn btn-ghost view-btn" style="width:auto;padding:8px 14px;margin:0;font-size:12px;">View</button>
+      <button class="btn btn-ghost restore-btn" style="width:auto;padding:8px 14px;margin:0 0 0 6px;font-size:12px;">Restore</button>
     `;
-    row.querySelector('button').addEventListener('click', ()=> openReportForHistory(h));
+    row.querySelector('.view-btn').addEventListener('click', ()=> openReportForHistory(h));
+    row.querySelector('.restore-btn').addEventListener('click', ()=> restoreCycleFromHistory(h));
     wrap.appendChild(row);
   });
+}
+
+async function restoreCycleFromHistory(h){
+  if(!API_URL){ showToast('Restore needs a live backend connection'); return; }
+  if(!navigator.onLine){ showToast('You\'re offline — reconnect to restore a cycle'); return; }
+  const ok = await askConfirm('Restore "' + h.label + '"?',
+    'This brings its transactions and extra income back into your current cycle and removes it from History. Use this if it archived by mistake.');
+  if(!ok) return;
+
+  // Cancel any debounced save already queued from something typed/edited just
+  // before this, and block the periodic background sync for the duration of
+  // the restore. Without this, a sync landing between the restore call and
+  // the state refresh below pushes this browser's stale pre-restore
+  // transactions and silently undoes the restore.
+  clearTimeout(saveTimer);
+  syncSuspended = true;
+  try{
+    const data = await apiPost('restoreCycle', {label: h.label});
+    if(!data || data.error){ showToast('Could not restore: ' + (data && data.error || 'unknown error')); return; }
+    const fresh = await apiGet('getState');
+    if(fresh && !fresh.error){
+      state = Object.assign(state, fresh);
+      isDirty = false;
+      saveLocalMirror();
+      renderAll();
+      updateSyncIndicator();
+    }
+    showToast('Cycle restored — ' + data.restoredTransactions + ' transaction(s) back');
+  }catch(e){
+    showToast('Could not reach backend to restore');
+  }finally{
+    syncSuspended = false;
+  }
 }
 
 function renderYearSelect(){
@@ -1246,6 +1512,50 @@ document.getElementById('yearReportBtn').addEventListener('click', ()=>{
 /* ============================================================
    RENDER: SETTINGS
    ============================================================ */
+/* ============================================================
+   DRAG-TO-REORDER CATEGORIES (Settings) — Pointer Events cover mouse and
+   touch with one code path. Reordering only happens within state.categories'
+   array order (which is exactly what the backend persists and reads back),
+   so no new schema field is needed — just the array order itself.
+   ============================================================ */
+let dragCatId = null;
+function attachCatDrag(handle, div){
+  handle.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    dragCatId = div.dataset.catId;
+    div.classList.add('dragging');
+    div.style.opacity = '0.6';
+    try{ handle.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  handle.addEventListener('pointermove', (e)=>{
+    if(dragCatId !== div.dataset.catId) return;
+    const wrap = document.getElementById('settingsCatList');
+    const rows = [...wrap.querySelectorAll('.settings-cat')];
+    const y = e.clientY;
+    for(const row of rows){
+      if(row === div) continue;
+      const rect = row.getBoundingClientRect();
+      if(y > rect.top && y < rect.bottom){
+        if(y < rect.top + rect.height/2){ wrap.insertBefore(div, row); }
+        else { wrap.insertBefore(div, row.nextSibling); }
+        break;
+      }
+    }
+  });
+  const finishDrag = ()=>{
+    if(dragCatId !== div.dataset.catId) return;
+    div.classList.remove('dragging');
+    div.style.opacity = '';
+    dragCatId = null;
+    const wrap = document.getElementById('settingsCatList');
+    const newOrderIds = [...wrap.querySelectorAll('.settings-cat')].map(el=>el.dataset.catId);
+    state.categories.sort((a,b)=> newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
+    saveState(); renderAll();
+  };
+  handle.addEventListener('pointerup', finishDrag);
+  handle.addEventListener('pointercancel', finishDrag);
+}
+
 function renderSettings(){
   const curSel = document.getElementById('currencySelect');
   if(!curSel.options.length){
@@ -1260,7 +1570,7 @@ function renderSettings(){
   const budget = totalBudget();
   const income = combinedIncome();
   const totalLine = document.getElementById('budgetTotalLine');
-  document.getElementById('budgetTotalVal').textContent = fmt(budget) + (income>0 ? ' (' + Math.round(budget/income*100) + '% of income)' : '');
+  document.getElementById('budgetTotalVal').textContent = fmt(budget) + (income>0 && !privacyMode ? ' (' + Math.round(budget/income*100) + '% of income)' : '');
   totalLine.classList.toggle('over', income>0 && (budget + totalSavingsBudget()) > income);
 
   const wrap = document.getElementById('settingsCatList');
@@ -1268,10 +1578,14 @@ function renderSettings(){
   state.categories.forEach(cat=>{
     const div = document.createElement('div');
     div.className = 'settings-cat';
+    div.dataset.catId = cat.id;
     const isSavings = cat.group === 'Savings';
     div.innerHTML = `
       <div class="settings-cat-name" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span></span>
+        <span style="display:flex;align-items:center;">
+          <span class="cat-drag-handle" title="Drag to reorder" aria-label="Drag to reorder" style="cursor:grab;color:var(--muted);margin-right:8px;touch-action:none;font-size:14px;">⠿</span>
+          ${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)} <span style="color:var(--muted-2); font-weight:400;">(${escapeHtml(cat.group)})</span>
+        </span>
         <button class="cat-delete" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Delete category" aria-label="Delete category"
           style="background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px;">🗑</button>
       </div>
@@ -1290,6 +1604,11 @@ function renderSettings(){
           <input type="number" class="cat-goal" data-id="${cat.id}" value="${cat.goal||0}" min="0" step="1">
         </div>`}
       </div>
+      ${!isSavings ? `
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin:-6px 0 8px;cursor:pointer;">
+        <input type="checkbox" class="cat-rollover" data-id="${cat.id}" style="width:auto;margin:0;" ${cat.rollover?'checked':''}>
+        Carry over unused budget to next cycle
+      </label>` : ''}
     `;
     wrap.appendChild(div);
   });
@@ -1311,23 +1630,19 @@ function renderSettings(){
       saveState(); renderAll();
     });
   });
+  wrap.querySelectorAll('.cat-rollover').forEach(inp=>{
+    inp.addEventListener('change', e=>{
+      catById(e.target.dataset.id).rollover = e.target.checked;
+      saveState(); renderAll();
+      showToast(e.target.checked ? 'Rollover enabled' : 'Rollover disabled');
+    });
+  });
+  wrap.querySelectorAll('.cat-drag-handle').forEach(handle=>{
+    attachCatDrag(handle, handle.closest('.settings-cat'));
+  });
   wrap.querySelectorAll('.cat-delete').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const id = btn.dataset.id;
-      // The Debt tracker and Loan tracker both hardcode categoryId 'debt' /
-      // 'loaned' on every transaction they create, so deleting either
-      // category while trackers are still active would silently break the
-      // link — the transactions would just show as "Uncategorized" and stop
-      // rolling up into that tracker's totals. Block it instead of letting
-      // it fail silently.
-      if(id === 'debt' && state.debts.length){
-        showToast('Clear or delete your tracked debts first (Finance → Debt) before removing this category');
-        return;
-      }
-      if(id === 'loaned' && state.loans.length){
-        showToast('Clear or delete your tracked loans first (Finance → Lent) before removing this category');
-        return;
-      }
       const spent = spentFor(id);
       const msg = spent > 0
         ? `"${btn.dataset.name}" has ${fmt(spent)} logged against it this cycle. Deleting it will leave those transactions uncategorized (they won't be removed). Continue?`
@@ -1341,6 +1656,7 @@ function renderSettings(){
   });
 
   renderBillsList();
+  renderRecurringList();
 }
 
 function renderBillsList(){
@@ -1380,36 +1696,51 @@ document.getElementById('addBillBtn').addEventListener('click', ()=>{
   showToast('Bill added');
 });
 
+function renderRecurringList(){
+  const wrap = document.getElementById('recurringList');
+  const tpls = state.recurringTemplates || [];
+  document.getElementById('recurTag').textContent = tpls.length + ' active';
+  if(!tpls.length){ wrap.innerHTML = '<div class="empty-hist">None yet — check "Repeats every cycle" when logging an expense to add one.</div>'; return; }
+  wrap.innerHTML = '';
+  tpls.forEach(tpl=>{
+    const cat = catById(tpl.categoryId);
+    const row = document.createElement('div');
+    row.className = 'extra-row';
+    row.innerHTML = `
+      <div class="extra-left">
+        <div class="src">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(tpl.desc || (cat?cat.name:'Uncategorized'))}</div>
+        <div class="dt">${escapeHtml(cat?cat.name:'Uncategorized')} · ${fmt(tpl.amount)} each cycle</div>
+      </div>
+      <button class="tx-del" aria-label="Stop recurring">✕</button>
+    `;
+    row.querySelector('.tx-del').addEventListener('click', async ()=>{
+      const ok = await askConfirm('Stop "' + (tpl.desc || cat?.name || 'this') + '" from recurring?',
+        'It won\'t be auto-logged next cycle. Any past instances already logged stay untouched.');
+      if(!ok) return;
+      state.recurringTemplates = state.recurringTemplates.filter(rt=>rt.id!==tpl.id);
+      // Unlink any live transaction still pointing at this template so it
+      // doesn't silently re-link to a since-deleted recurring rule.
+      state.transactions.forEach(t=>{ if(t.recurTemplateId===tpl.id) delete t.recurTemplateId; });
+      saveState(); renderAll();
+      showToast('Recurring transaction stopped');
+    });
+    wrap.appendChild(row);
+  });
+}
+
 /* ============================================================
    RENDER ALL + NAV
-   ------------------------------------------------------------
-   Performance: only the currently-visible tab is actually
-   re-rendered on every state change (previously all 5 views were
-   rebuilt on every single edit — add a ₦200 expense and the whole
-   Debt tab, Savings tab, History tab and Settings tab all got
-   rebuilt too, even though nobody could see them). The nav click
-   handler below always re-renders whichever tab it switches TO,
-   so a tab is guaranteed fresh the moment it becomes visible —
-   this is what keeps the optimization safe: nothing goes visibly
-   stale, it just isn't rebuilt while off-screen.
    ============================================================ */
-function renderViewByName(view){
-  if(view==='dashboard') renderDashboard();
-  else if(view==='finance'){ renderSavingsTab(); renderDebtTab(); renderLoansTab(); }
-  else if(view==='history') renderHistory();
-  else if(view==='settings') renderSettings();
-  // 'guide' has no dynamic content besides personalNotes, which is bound
-  // directly to its own input listener — nothing to render on switch.
-}
-function currentViewName(){
-  const el = document.querySelector('.view.active');
-  return el ? el.id.replace('view-','') : 'dashboard';
-}
 function renderAll(){
   refreshCycleDates();
+  renderDashboard();
+  renderSavingsTab();
+  renderDebtTab();
+  renderLoansTab();
+  renderHistory();
+  renderSettings();
   const sel = document.getElementById('txCategory');
   sel.innerHTML = state.categories.map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}${c.group==='Savings'?' (savings)':''}</option>`).join('');
-  renderViewByName(currentViewName());
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -1418,7 +1749,6 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     btn.classList.add('active');
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
-    renderViewByName(btn.dataset.view); // guarantee freshness — see note above
     if(btn.dataset.view === 'settings') renderSharesList();
   });
 });
@@ -1500,6 +1830,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   document.getElementById('txCategory').value = state.categories[0] ? state.categories[0].id : '';
   document.getElementById('txDate').value = toDateInput(new Date());
   document.getElementById('voiceStatus').style.display = 'none';
+  document.getElementById('txRecurring').checked = false;
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -1511,6 +1842,7 @@ function openEditTx(t){
   document.getElementById('txMethod').value = t.method || '';
   document.getElementById('txDesc').value = t.desc || '';
   document.getElementById('txDate').value = t.date;
+  document.getElementById('txRecurring').checked = t.recurTemplateId != null;
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -1520,16 +1852,41 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
   const method = document.getElementById('txMethod').value;
   const desc = document.getElementById('txDesc').value.trim();
   const date = document.getElementById('txDate').value || toDateInput(new Date());
+  const wantsRecurring = document.getElementById('txRecurring').checked;
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  if(!state.recurringTemplates) state.recurringTemplates = [];
 
+  let t;
   if(editingTxId != null){
-    const t = state.transactions.find(x=>x.id===editingTxId);
+    t = state.transactions.find(x=>x.id===editingTxId);
     if(t){ Object.assign(t, {amount, categoryId, method, desc, date}); }
     showToast('Expense updated');
   } else {
-    state.transactions.push({id: Date.now(), amount, categoryId, desc, date, method});
+    t = {id: Date.now(), amount, categoryId, desc, date, method};
+    state.transactions.push(t);
     showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
   }
+
+  // Keep the recurring template in sync with the checkbox: create one if
+  // newly checked, update it in place if it already existed, or remove it
+  // if unchecked (this only stops FUTURE auto-logging — past instances of
+  // it are ordinary transactions and are untouched).
+  if(t){
+    if(wantsRecurring){
+      if(t.recurTemplateId){
+        const tpl = state.recurringTemplates.find(rt=>rt.id===t.recurTemplateId);
+        if(tpl) Object.assign(tpl, {categoryId, desc, amount, method});
+      } else {
+        const tplId = 'rt-' + Date.now();
+        state.recurringTemplates.push({id: tplId, categoryId, desc, amount, method});
+        t.recurTemplateId = tplId;
+      }
+    } else if(t.recurTemplateId){
+      state.recurringTemplates = state.recurringTemplates.filter(rt=>rt.id!==t.recurTemplateId);
+      delete t.recurTemplateId;
+    }
+  }
+
   saveState(); renderAll();
   closeSheetEl(addSheet); activeSheet=null; editingTxId=null;
   document.getElementById('txAmount').value=''; document.getElementById('txDesc').value='';
@@ -1574,11 +1931,17 @@ async function checkFxRate(){
   previewEl.textContent = 'Checking live exchange rate…';
 
   try{
-    const res = await fetch(`https://api.frankfurter.app/latest?amount=${amount}&from=${fromCode}&to=${toCode}`);
+    // v2 endpoint (api.frankfurter.dev) — the old v1 (api.frankfurter.app) is
+    // now frozen at 31 ECB-only currencies and doesn't cover NGN, GHS, or KES,
+    // three of the currencies this app itself offers. v2 covers 165 and
+    // includes all of them. It returns a bare rate, not a converted amount,
+    // so the multiplication happens here instead of via a `?amount=` param.
+    const res = await fetch(`https://api.frankfurter.dev/v2/rate/${fromCode}/${toCode}`);
+    if(!res.ok) throw new Error('rate lookup failed (' + res.status + ')');
     const data = await res.json();
-    const converted = data.rates && data.rates[toCode];
-    if(!converted) throw new Error('no rate');
-    const rate = converted / amount;
+    if(typeof data.rate !== 'number') throw new Error('no rate in response');
+    const rate = data.rate;
+    const converted = amount * rate;
     lastFxQuote = { rate, from: fromCode, to: toCode, date: data.date };
     previewEl.className = 'fx-preview';
     previewEl.textContent = `≈ ${fmt(converted)} at today's rate (1 ${fromCode} = ${rate.toFixed(2)} ${toCode}, ${data.date})`;
@@ -1674,16 +2037,17 @@ async function sendAiQuestion(){
   state.aiHistory.push({id: thinkingId, role:'bot', text:'Thinking…'});
   renderAiChat();
   try{
-    const data = await apiPost('askAI', {question: q});
+    const data = await apiPost('askAI', {
+      question: q,
+      // Last few PRIOR turns (excluding the question/placeholder just pushed
+      // above) give the assistant real conversational memory — e.g. "what
+      // about last week?" — instead of answering blind every time.
+      history: state.aiHistory.slice(0, -2).filter(m => !m.error).slice(-8).map(m => ({role: m.role, text: m.text}))
+    });
     const msg = state.aiHistory.find(m=>m.id===thinkingId);
     if(msg){
       msg.text = data.answer || data.error || 'No response — try again.';
       msg.error = !data.answer;
-      // Code.gs auto-retries against a backup model if the primary Groq
-      // model ID has been decommissioned — surface that here so it's clear
-      // this wasn't your regular model answering, worth knowing since Groq
-      // regularly deprecates model IDs (see Code.gs comments near GROQ_MODEL).
-      if(data.usedFallback) msg.text += '\n\n(sent via backup AI model — see Code.gs)';
     }
   }catch(e){
     const msg = state.aiHistory.find(m=>m.id===thinkingId);
@@ -1694,6 +2058,47 @@ async function sendAiQuestion(){
 document.getElementById('aiAskBtn').addEventListener('click', sendAiQuestion);
 document.getElementById('aiQuestion').addEventListener('keydown', (e)=>{
   if(e.key==='Enter'){ e.preventDefault(); sendAiQuestion(); }
+});
+
+/* ============================================================
+   KEYBOARD SHORTCUTS (desktop/browser use — app is otherwise fully
+   gesture-driven for mobile, so these are pure bonus for a keyboard+mouse
+   session and never required)
+   ============================================================ */
+document.addEventListener('keydown', (e)=>{
+  const tag = (e.target && e.target.tagName || '').toLowerCase();
+  const isTyping = tag==='input' || tag==='textarea' || tag==='select' || (e.target && e.target.isContentEditable);
+
+  if(e.key === 'Escape'){
+    if(activeSheet){ closeSheetEl(activeSheet); activeSheet = null; }
+    else if(isTyping) e.target.blur();
+    return;
+  }
+  if(isTyping) return; // don't hijack typing in any field below this point
+
+  if(e.key === 'n' || e.key === 'N'){
+    e.preventDefault();
+    document.getElementById('fabAdd').click();
+  } else if(e.key === '/'){
+    e.preventDefault();
+    document.querySelector('.nav-btn[data-view="history"]')?.click();
+    document.getElementById('txSearchInput').focus();
+  }
+});
+
+/* ============================================================
+   TRANSACTION SEARCH (History tab) — filters live, no backend round trip
+   ============================================================ */
+document.getElementById('txSearchInput').addEventListener('input', (e)=>{
+  txSearchTerm = e.target.value;
+  document.getElementById('txSearchClearBtn').style.display = txSearchTerm ? '' : 'none';
+  renderHistory();
+});
+document.getElementById('txSearchClearBtn').addEventListener('click', ()=>{
+  txSearchTerm = '';
+  document.getElementById('txSearchInput').value = '';
+  document.getElementById('txSearchClearBtn').style.display = 'none';
+  renderHistory();
 });
 
 /* ============================================================
@@ -1784,7 +2189,7 @@ function buildReportData(snapshot){
   const overBudget = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-over');
   const nearLimit = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-near');
 
-  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit };
+  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit, txs };
 }
 
 function generateReportText(d, periodLabel, note){
@@ -1821,12 +2226,12 @@ function generateReportText(d, periodLabel, note){
   return lines.join('\n');
 }
 
-const PIE_COLORS = ['#E8B14C','#3FC7B0','#FF6B6B','#F2B84B','#8892A6','#B8802A','#128C77'];
+const PIE_COLORS = ['#FFC24D','#00E5C7','#FF3B30','#FFB020','#7B8494','#B8790A','#0E8A76'];
 function drawPieChart(canvas, data){
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const total = data.reduce((s,x)=>s+x.spent,0);
-  if(!total){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No spending yet', 20, canvas.height/2); return; }
+  if(!total){ ctx.fillStyle='#7B8494'; ctx.font='11px sans-serif'; ctx.fillText('No spending yet', 20, canvas.height/2); return; }
   const cx = 70, cy = canvas.height/2, r = 60;
   let start = -Math.PI/2;
   data.slice(0,6).forEach((x,i)=>{
@@ -1850,16 +2255,16 @@ function drawPieChart(canvas, data){
 function drawBarChart(canvas, entries){
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!entries.length){ ctx.fillStyle='#8892A6'; ctx.font='11px sans-serif'; ctx.fillText('No daily spend yet', 20, canvas.height/2); return; }
+  if(!entries.length){ ctx.fillStyle='#7B8494'; ctx.font='11px sans-serif'; ctx.fillText('No daily spend yet', 20, canvas.height/2); return; }
   const max = Math.max(...entries.map(e=>e.amount), 1);
   const w = canvas.width, h = canvas.height, pad=20, barW = Math.max((w-pad*2)/entries.length - 4, 2);
   entries.forEach((e,i)=>{
     const barH = (e.amount/max) * (h - pad*2);
     const x = pad + i*((w-pad*2)/entries.length);
-    ctx.fillStyle = '#3FC7B0';
+    ctx.fillStyle = '#00E5C7';
     ctx.fillRect(x, h-pad-barH, barW, barH);
   });
-  ctx.fillStyle = '#8892A6'; ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#7B8494'; ctx.font = '9px sans-serif';
   ctx.fillText(entries[0].date.slice(5), pad, h-6);
   ctx.fillText(entries[entries.length-1].date.slice(5), w-pad-28, h-6);
 }
@@ -1881,6 +2286,23 @@ function openWhatIf(){
   activeSheet = whatIfSheet; openSheetEl(whatIfSheet);
 }
 document.getElementById('whatIfBtn').addEventListener('click', openWhatIf);
+
+/* Insights accordion (quote + weekday pattern) — collapsed by default, remembered per device */
+(function initInsightsToggle(){
+  const toggleBtn = document.getElementById('insightsToggle');
+  const body = document.getElementById('insightsBody');
+  if(!toggleBtn || !body) return;
+  const STORAGE_KEY = 'insightsOpen';
+  const isOpen = localStorage.getItem(STORAGE_KEY) === '1';
+  toggleBtn.classList.toggle('open', isOpen);
+  body.classList.toggle('open', isOpen);
+  toggleBtn.addEventListener('click', () => {
+    const nowOpen = !body.classList.contains('open');
+    toggleBtn.classList.toggle('open', nowOpen);
+    body.classList.toggle('open', nowOpen);
+    localStorage.setItem(STORAGE_KEY, nowOpen ? '1' : '0');
+  });
+})();
 document.getElementById('whatIfCloseBtn').addEventListener('click', ()=>{ closeSheetEl(whatIfSheet); activeSheet=null; });
 document.getElementById('whatIfCategory').addEventListener('change', updateWhatIf);
 document.getElementById('whatIfSlider').addEventListener('input', (e)=>{
@@ -2050,8 +2472,12 @@ function loadJsPdf(){
   jsPdfLoading = new Promise((resolve, reject)=>{
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
+    // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
+    s.integrity = 'sha384-REPLACE_WITH_HASH_FROM_SRIHASH_ORG';
+    s.crossOrigin = 'anonymous';
     s.onload = resolve;
-    s.onerror = reject;
+    s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
     document.head.appendChild(s);
   });
   return jsPdfLoading;
@@ -2181,6 +2607,27 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
   }catch(e){
     showToast('Could not generate PDF — try Copy instead');
   }
+});
+
+function csvEscape(v){
+  v = String(v==null ? '' : v);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+}
+document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
+  if(!currentReportD || !currentReportD.txs){ showToast('No transaction data for this report'); return; }
+  const rows = [['Date','Category','Description','Amount','Method']];
+  [...currentReportD.txs].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
+    const cat = catById(t.categoryId);
+    rows.push([t.date, cat ? cat.name : 'Uncategorized', t.desc || '', t.amount, t.method || '']);
+  });
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = currentReportFilename + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('CSV downloaded');
 });
 
 /* ============================================================
