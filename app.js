@@ -1040,80 +1040,31 @@ function renderTxRow(container, t, showDelete){
   const wrap = document.createElement('div');
   wrap.className = 'tx-swipe-wrap';
   wrap.innerHTML = `
-    <div class="tx-swipe-actions">
-      <button class="tx-swipe-btn tx-swipe-edit" aria-label="Edit">✏️</button>
-      ${showDelete ? `<button class="tx-swipe-btn tx-swipe-del" aria-label="Delete">🗑</button>` : ''}
-    </div>
-    <div class="tx-row" style="cursor:pointer;">
+    <div class="tx-row">
       <div class="tx-left">
         <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
         <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
       </div>
-      <div style="display:flex;align-items:center;">
-        <div class="tx-right">
-          <div class="tx-amt">${fmt(t.amount)}</div>
-          <div class="tx-date">${t.date}</div>
-        </div>
-        ${showDelete ? `<button class="tx-del" data-id="${t.id}" aria-label="Delete">✕</button>` : ''}
+      <div class="tx-right">
+        <div class="tx-amt-chip"><span class="tx-amt">${fmt(t.amount)}</span></div>
+        <div class="tx-date">${t.date}</div>
+      </div>
+      <div class="tx-actions">
+        <button class="tx-action-btn tx-action-edit" aria-label="Edit">✏️</button>
+        ${showDelete ? `<button class="tx-action-btn tx-action-del" data-id="${t.id}" aria-label="Delete">🗑</button>` : ''}
       </div>
     </div>
   `;
   container.appendChild(wrap);
   const row = wrap.querySelector('.tx-row');
 
-  // Tap / click to edit (desktop and a non-drag tap on mobile)
-  row.addEventListener('click', (e)=>{
-    if(e.target.closest('.tx-del')) return;
-    if(row.dataset.dragged==='1'){ row.dataset.dragged='0'; return; }
-    openEditTx(t);
-  });
-  wrap.querySelector('.tx-swipe-edit').addEventListener('click', (e)=>{
-    e.stopPropagation(); resetSwipe(row); openEditTx(t);
-  });
+  row.querySelector('.tx-action-edit').addEventListener('click', (e)=>{ e.stopPropagation(); openEditTx(t); });
   if(showDelete){
-    row.querySelector('.tx-del').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      deleteTxWithUndo(t);
-    });
-    const delBtn = wrap.querySelector('.tx-swipe-del');
-    if(delBtn) delBtn.addEventListener('click', (e)=>{
+    row.querySelector('.tx-action-del').addEventListener('click', (e)=>{
       e.stopPropagation();
       deleteTxWithUndo(t);
     });
   }
-  attachSwipe(row);
-}
-
-/* Swipe-to-reveal: drag a transaction row left to expose Edit/Delete buttons underneath. */
-const SWIPE_REVEAL = 76;
-let openSwipeRow = null;
-function resetSwipe(row){ row.style.transition='transform .2s ease'; row.style.transform='translateX(0)'; if(openSwipeRow===row) openSwipeRow=null; }
-function attachSwipe(row){
-  let startX=0, dx=0, dragging=false;
-  row.addEventListener('touchstart', e=>{
-    if(openSwipeRow && openSwipeRow!==row) resetSwipe(openSwipeRow);
-    startX = e.touches[0].clientX; dragging = true; dx = 0;
-    row.dataset.dragged = '0';
-    row.style.transition = 'none';
-  }, {passive:true});
-  row.addEventListener('touchmove', e=>{
-    if(!dragging) return;
-    dx = e.touches[0].clientX - startX;
-    if(Math.abs(dx) > 6) row.dataset.dragged = '1';
-    const x = Math.min(0, Math.max(-SWIPE_REVEAL, dx));
-    row.style.transform = 'translateX(' + x + 'px)';
-  }, {passive:true});
-  row.addEventListener('touchend', ()=>{
-    dragging = false;
-    row.style.transition = 'transform .2s ease';
-    if(dx < -SWIPE_REVEAL*0.5){
-      row.style.transform = 'translateX(-' + SWIPE_REVEAL + 'px)';
-      openSwipeRow = row;
-    } else {
-      row.style.transform = 'translateX(0)';
-      if(openSwipeRow===row) openSwipeRow = null;
-    }
-  });
 }
 
 /* ============================================================
@@ -1137,7 +1088,10 @@ function renderSavingsTab(){
         <div style="flex:1;min-width:0;">
           <div class="save-top">
             <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
-            <div class="save-amt">${fmt(total)}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="save-amt">${fmt(total)}</div>
+              <button class="save-adjust-btn" data-adjust="${cat.id}" data-name="${escapeHtml(cat.name)}" aria-label="Adjust total saved" title="Adjust total saved">✎</button>
+            </div>
           </div>
           <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
         </div>
@@ -1145,6 +1099,18 @@ function renderSavingsTab(){
       ${goal>0 ? `<div class="save-foot" style="margin-top:8px;"><span>Goal: ${fmt(goal)}</span></div>` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
     `;
     wrap.appendChild(div);
+  });
+  wrap.querySelectorAll('[data-adjust]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const catId = btn.dataset.adjust;
+      openAdjustSheet({
+        type: 'savings', id: catId,
+        title: 'Adjust ' + btn.dataset.name,
+        label: 'Total saved (lifetime) ' + (state.currency||'₦'),
+        hint: 'Sets the total directly — use this to correct it if money was withdrawn outside the app, or to clear it (enter 0) if this goal no longer applies.',
+        prefill: lifetimeSaved(catId)
+      });
+    });
   });
 }
 
@@ -1215,12 +1181,22 @@ function renderDebtTab(){
         <div class="debt-actions">
           ${rem>0 ? `<button class="debt-btn-pay" data-pay="${debt.id}">Log payment</button>` : ''}
           ${state.debtStrategy==='manual' && rem>0 ? `<button class="debt-btn-focus" data-focus="${debt.id}">${isFocused?'Focused':'Set as focus'}</button>` : ''}
+          <button class="debt-btn-adjust" data-adjustdebt="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Adjust for a payment made previously" title="Log a payment from a past cycle">✎</button>
           <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Delete debt">🗑</button>
         </div>
       `;
       listWrap.appendChild(div);
     });
     listWrap.querySelectorAll('[data-pay]').forEach(b=>b.addEventListener('click', ()=>openDebtPaySheet(b.dataset.pay)));
+    listWrap.querySelectorAll('[data-adjustdebt]').forEach(b=>b.addEventListener('click', ()=>{
+      openAdjustSheet({
+        type: 'debt', id: b.dataset.adjustdebt,
+        title: 'Adjust ' + b.dataset.name,
+        label: 'Amount already paid, not yet logged (' + (state.currency||'₦') + ')',
+        hint: 'For a payment you already made in a previous cycle that never got logged — this reduces the remaining balance without touching this cycle\'s spending. Enter a negative number to correct downward.',
+        prefill: ''
+      });
+    }));
     listWrap.querySelectorAll('[data-focus]').forEach(b=>b.addEventListener('click', ()=>{
       state.debtFocusId = b.dataset.focus; saveState(); renderAll();
     }));
@@ -1273,12 +1249,22 @@ function renderLoanTab(){
       <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
       <div class="debt-actions">
         ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
+        <button class="debt-btn-adjust" data-adjustloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Adjust for a repayment made previously" title="Log a repayment from a past cycle">✎</button>
         <button class="debt-btn-del" data-delloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
       </div>
     `;
     listWrap.appendChild(div);
   });
   listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
+  listWrap.querySelectorAll('[data-adjustloan]').forEach(b=>b.addEventListener('click', ()=>{
+    openAdjustSheet({
+      type: 'loan', id: b.dataset.adjustloan,
+      title: 'Adjust ' + b.dataset.name,
+      label: 'Amount already repaid, not yet logged (' + (state.currency||'₦') + ')',
+      hint: 'For a repayment you already received in a previous cycle that never got logged — this reduces what\'s still owed without touching this cycle\'s figures. Enter a negative number to correct downward.',
+      prefill: ''
+    });
+  }));
   listWrap.querySelectorAll('[data-delloan]').forEach(b=>b.addEventListener('click', async ()=>{
     const repaidAmt = paidForLoan(b.dataset.delloan);
     const msg = repaidAmt>0
@@ -2724,6 +2710,42 @@ document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
    ============================================================ */
 const confirmBox = document.getElementById('confirmBox');
 let confirmResolver = null;
+// Shared small sheet for manually correcting an accumulated total — used by
+// Savings (set the lifetime total directly, e.g. if money was withdrawn
+// outside the app or a goal is no longer realistic), and Debt/Loans (add a
+// past payment/repayment that already happened but was never logged, without
+// it hitting this cycle's budget the way a normal transaction would).
+const adjustSheet = document.getElementById('adjustSheet');
+let adjustContext = null;
+function openAdjustSheet(opts){
+  adjustContext = opts;
+  document.getElementById('adjustSheetTitle').textContent = opts.title;
+  document.getElementById('adjustSheetLabel').textContent = opts.label;
+  document.getElementById('adjustSheetHint').textContent = opts.hint || '';
+  document.getElementById('adjustSheetInput').value = opts.prefill != null ? opts.prefill : '';
+  activeSheet = adjustSheet; openSheetEl(adjustSheet);
+}
+document.getElementById('adjustSheetCancelBtn').addEventListener('click', ()=>{ closeSheetEl(adjustSheet); activeSheet=null; adjustContext=null; });
+document.getElementById('adjustSheetSaveBtn').addEventListener('click', ()=>{
+  if(!adjustContext) return;
+  const raw = document.getElementById('adjustSheetInput').value;
+  const val = Number(raw);
+  if(raw==='' || isNaN(val)){ showToast('Enter a valid number'); return; }
+  if(adjustContext.type==='savings'){
+    // lifetimeSaved = savingsAccumulated + this-cycle contributions, so back
+    // out the live contribution to land exactly on the total they typed.
+    const contributed = spentFor(adjustContext.id);
+    state.savingsAccumulated[adjustContext.id] = Math.max(val - contributed, 0);
+  } else if(adjustContext.type==='debt'){
+    state.debtPaidAccumulated[adjustContext.id] = Math.max((state.debtPaidAccumulated[adjustContext.id]||0) + val, 0);
+  } else if(adjustContext.type==='loan'){
+    state.loanPaidAccumulated[adjustContext.id] = Math.max((state.loanPaidAccumulated[adjustContext.id]||0) + val, 0);
+  }
+  saveState(); renderAll();
+  closeSheetEl(adjustSheet); activeSheet=null; adjustContext=null;
+  showToast('Updated');
+});
+
 function askConfirm(title, msg){
   document.getElementById('confirmTitle').textContent = title;
   document.getElementById('confirmMsg').textContent = msg;
