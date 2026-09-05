@@ -45,6 +45,12 @@
   --muted:#7B8494;
   --muted-2:#4A5262;
   --shadow: 0 8px 24px rgba(0,0,0,.45);
+  /* Corporate "bank card" brand navy — deliberately constant across both
+     light/dark app themes, same as a physical debit card doesn't change
+     colour when your phone switches theme. Used only for the hero balance
+     card gradient and a couple of statement accents. */
+  --brand:#0F2A52;
+  --brand-2:#164070;
 }
 html[data-theme="light"]{
   --bg:#F5F3EE;
@@ -59,6 +65,8 @@ html[data-theme="light"]{
   --muted:#6B7280;
   --muted-2:#96A0B5;
   --shadow: 0 8px 20px rgba(30,25,10,.08);
+  --brand:#12345F;
+  --brand-2:#1B4C82;
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;transition:background .25s,color .25s;}
@@ -110,15 +118,28 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Hero card — big "safe to spend" number + simple bar, replacing the old
    circular gauge cluster with a compact bank-app style balance card. */
-.hero-card{margin:14px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:22px;
-  padding:22px 20px;box-shadow:var(--shadow);}
-.hero-lbl{font-size:12px;color:var(--muted);font-weight:500;}
+.hero-card{position:relative;margin:14px 20px 0;
+  background:linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 65%, color-mix(in srgb, var(--brand-2) 60%, var(--teal)) 130%);
+  border:1px solid var(--line);border-radius:22px;
+  padding:22px 20px;box-shadow:var(--shadow);overflow:hidden;
+  /* Scope-override the shared text vars just for this card so its copy
+     stays legible (light) on the navy gradient in BOTH app themes,
+     without needing separate rules for every element inside it. */
+  --text:#F5F7FA; --muted:rgba(245,247,250,.72);}
+.hero-card::before{ /* card-chip accent, bank-card convention */
+  content:'';position:absolute;top:20px;right:20px;width:34px;height:24px;border-radius:5px;
+  background:linear-gradient(135deg, rgba(255,255,255,.4), rgba(255,255,255,.08));
+  border:1px solid rgba(255,255,255,.28);}
+.hero-card::after{ /* subtle corner sheen */
+  content:'';position:absolute;top:-40%;right:-15%;width:70%;height:140%;
+  background:radial-gradient(circle, rgba(255,255,255,.10), transparent 60%);pointer-events:none;}
+.hero-lbl{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.02em;}
 .hero-num{font-family:'Space Grotesk',sans-serif;font-size:38px;font-weight:700;margin:4px 0 14px;letter-spacing:-.02em;
-  text-shadow:0 0 20px color-mix(in srgb, var(--teal) 35%, transparent);}
-.hero-bar-track{height:8px;border-radius:6px;background:var(--panel-2);overflow:hidden;}
+  color:var(--text);position:relative;}
+.hero-bar-track{height:8px;border-radius:6px;background:rgba(255,255,255,.16);overflow:hidden;position:relative;}
 .hero-bar-fill{height:100%;border-radius:6px;background:var(--teal);width:0%;transition:width .5s ease;}
-.hero-sub{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px;font-family:'JetBrains Mono',monospace;}
-.hero-stats{border-top:1px solid var(--line);padding-top:14px;margin-top:16px;}
+.hero-sub{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px;font-family:'JetBrains Mono',monospace;position:relative;}
+.hero-stats{border-top:1px solid rgba(255,255,255,.18);padding-top:14px;margin-top:16px;position:relative;}
 .hero-stat{font-size:12px;color:var(--muted);margin-bottom:3px;}
 .hero-stat b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
 .pace-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;margin-bottom:10px;}
@@ -240,10 +261,12 @@ body{min-height:100vh; padding-bottom:92px;}
 .st-target{background:rgba(139,146,166,.15);color:var(--muted);}
 .empty-hist{margin:0 20px;padding:26px 18px;text-align:center;color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:16px;font-size:12.5px;line-height:1.5;}
 
-/* Extra income */
-.extra-list{margin:0 20px;display:flex;flex-direction:column;gap:8px;}
-.extra-row{display:flex;justify-content:space-between;align-items:center;background:var(--panel);
-  border:1px solid var(--line);border-radius:12px;padding:11px 13px;}
+/* Extra income — same statement-panel treatment as the transaction list */
+.extra-list{margin:0 20px;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;}
+.extra-row{display:flex;justify-content:space-between;align-items:center;background:transparent;
+  border:none;border-radius:0;padding:11px 14px;}
+.extra-row:not(:last-child){border-bottom:1px solid var(--line);}
 .extra-left .src{font-size:12px;font-weight:600;}
 .extra-left .dt{font-size:10px;color:var(--muted-2);}
 .extra-right{display:flex;align-items:center;gap:8px;}
@@ -298,23 +321,28 @@ body{min-height:100vh; padding-bottom:92px;}
 .legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);}
 .legend-dot{width:8px;height:8px;border-radius:2px;}
 
-/* Transactions */
-.tx-list{margin:0 20px;display:flex;flex-direction:column;gap:8px;}
-.tx-row{display:flex;justify-content:space-between;align-items:center;background:var(--panel);
-  border:1px solid var(--line);border-radius:14px;padding:10px 13px;}
+/* Transactions — a single "statement" panel with divider lines between
+   entries (bank activity-list convention) rather than separate floating
+   cards per row. */
+.tx-list{margin:0 20px;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;}
+.tx-swipe-wrap:not(:last-child) .tx-row{border-bottom:1px solid var(--line);}
+.tx-row{display:flex;justify-content:space-between;align-items:center;background:transparent;
+  border:none;border-radius:0;padding:12px 14px;}
 .tx-left{min-width:0;display:flex;align-items:center;gap:11px;}
 .tx-icon-circle{width:34px;height:34px;border-radius:50%;background:var(--panel-2);display:flex;align-items:center;justify-content:center;font-size:14px;flex:none;}
 .tx-text{min-width:0;}
 .tx-cat{font-size:12px;font-weight:600;}
 .tx-desc{font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;}
 .tx-right{text-align:right;flex:none;padding-left:10px;}
-.tx-amt{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;}
+.tx-amt{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--red);}
+.tx-amt::before{content:'\2212\00A0';} /* "− " — statement-style signed amount, matches the "+" on extra income */
 .tx-date{font-size:10px;color:var(--muted-2);margin-top:1px;}
 .tx-del{background:none;border:none;color:var(--muted-2);font-size:16px;padding:0 0 0 10px;cursor:pointer;}
 .tx-tag-savings{font-size:9px;color:var(--teal);font-weight:600;margin-left:6px;}
 
 /* Swipe-to-reveal (mobile: swipe a row left to reveal Edit/Delete) */
-.tx-swipe-wrap{position:relative;overflow:hidden;border-radius:12px;}
+.tx-swipe-wrap{position:relative;overflow:hidden;}
 .tx-swipe-actions{position:absolute;top:0;right:0;bottom:0;display:flex;z-index:0;}
 .tx-swipe-btn{width:38px;border:none;font-size:15px;cursor:pointer;color:#fff;}
 .tx-swipe-edit{background:var(--gold);}
@@ -489,10 +517,14 @@ body{min-height:100vh; padding-bottom:92px;}
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
   .btn:hover{transform:translateY(-1px); filter:brightness(1.06);}
   .btn-primary:hover, .btn-teal:hover{box-shadow:0 6px 16px rgba(255,194,77,.25);}
-  .cat, .save-card, .debt-card, .hist-card, .faq-item, .note-item, .extra-row, .tx-row{
+  .cat, .save-card, .debt-card, .hist-card, .faq-item, .note-item{
     transition:transform .15s ease, border-color .15s ease;}
   .cat:hover, .save-card:hover, .debt-card:hover, .hist-card:hover{
     transform:translateY(-2px); border-color:var(--gold);}
+  /* extra-row/tx-row are now flat statement rows inside a shared panel
+     (no individual border to highlight) — hover gives a background tint instead. */
+  .extra-row, .tx-row{transition:background .15s ease;}
+  .extra-row:hover, .tx-swipe-wrap:hover .tx-row{background:var(--panel-2);}
   .tx-row:hover{border-color:var(--gold);}
   .nav-btn{transition:color .15s ease, transform .15s ease;}
   .nav-btn:hover{color:var(--gold); transform:translateY(-1px);}
@@ -1003,6 +1035,10 @@ body{min-height:100vh; padding-bottom:92px;}
   <div class="field">
     <label>Category</label>
     <select id="txCategory"></select>
+  </div>
+  <div class="field" id="txDebtLinkField" style="display:none;">
+    <label>Which debt is this for?</label>
+    <select id="txDebtLink"></select>
   </div>
   <div class="field">
     <label>Payment method</label>
