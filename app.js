@@ -105,6 +105,8 @@ let state = {
   debts: [],              // {id, creditor, reason, amount, interestRate}
   debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
   debtFocusId: '',         // used when debtStrategy === 'manual'
+  loans: [],               // {id, borrower, reason, amount} — money YOU lent out
+  loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
   aiHistory: [],           // {id, role:'user'|'bot', text, error?}
   personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
   bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
@@ -157,6 +159,25 @@ function loadLocalMirror(){
   }catch(e){ return null; }
 }
 
+// Wraps fetch() with a hard timeout via AbortController. Without this, a
+// stalled request (weak mobile signal, an Apps Script cold start that never
+// quite finishes, a proxy that swallows the response) hangs forever — the
+// fetch promise neither resolves nor rejects, so callers relying on
+// try/catch (including the login screen) get stuck on "Checking…"
+// indefinitely with no way to know something went wrong. Aborting after a
+// bounded time turns that silent hang into a normal, catchable failure that
+// existing retry logic (trySyncNow, the 30s safety-net interval, the
+// 'online' listener) already knows how to handle.
+async function fetchWithTimeout(url, options, timeoutMs){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  try{
+    return await fetch(url, Object.assign({}, options, {signal: controller.signal}));
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 // Centralized request helpers — every backend call goes through these,
 // so auth (session/token) is attached consistently and a session that's
 // expired or invalid triggers the lock screen instead of silently failing.
@@ -165,18 +186,18 @@ async function apiGet(action, extraParams){
   if(sessionToken) qs += '&session=' + encodeURIComponent(sessionToken);
   if(API_TOKEN) qs += '&token=' + encodeURIComponent(API_TOKEN);
   if(extraParams) Object.keys(extraParams).forEach(k => qs += '&'+k+'='+encodeURIComponent(extraParams[k]));
-  const res = await fetch(API_URL + qs);
+  const res = await fetchWithTimeout(API_URL + qs, undefined, 20000);
   const data = await res.json();
   if(data && data.error === 'Unauthorized') onSessionInvalid();
   return data;
 }
 async function apiPost(action, payload){
   const body = Object.assign({action, token: API_TOKEN, session: sessionToken}, payload||{});
-  const res = await fetch(API_URL, {
+  const res = await fetchWithTimeout(API_URL, {
     method: 'POST',
     headers: {'Content-Type': 'text/plain;charset=utf-8'}, // avoids a CORS preflight Apps Script doesn't handle
     body: JSON.stringify(body)
-  });
+  }, 20000);
   const data = await res.json();
   if(data && data.error === 'Unauthorized') onSessionInvalid();
   return data;
@@ -222,6 +243,8 @@ async function loadState(){
   if(!state.debts) state.debts = [];
   if(!state.debtStrategy) state.debtStrategy = 'avalanche';
   if(state.debtFocusId == null) state.debtFocusId = '';
+  if(!state.loans) state.loans = [];
+  if(!state.loanPaidAccumulated) state.loanPaidAccumulated = {};
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
@@ -368,6 +391,20 @@ function suggestedFocusDebt(){
   if(state.debtStrategy==='snowball') return active.slice().sort((a,b)=>remainingForDebt(a)-remainingForDebt(b))[0];
   return debtById(state.debtFocusId) || active[0];
 }
+
+// ---- Loans (money lent OUT to others) — mirrors the debt helpers above,
+// but repayments live in extraIncome (incoming money) rather than
+// transactions (spending), since getting repaid isn't an expense.
+function loanById(id){ return state.loans.find(l=>l.id===id); }
+function paidForLoan(loanId){
+  const accumulated = (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
+  const liveThisCycle = state.extraIncome.filter(x=>x.loanId===loanId).reduce((s,x)=>s+Number(x.amount),0);
+  return accumulated + liveThisCycle;
+}
+function remainingForLoan(loan){ return Math.max(Number(loan.amount) - paidForLoan(loan.id), 0); }
+function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
+function totalLoanRepaid(){ return state.loans.reduce((s,l)=>s+paidForLoan(l.id),0); }
+function totalLoanRemaining(){ return Math.max(totalLoaned()-totalLoanRepaid(),0); }
 
 function daysBetween(a,b){ return Math.round((b-a)/86400000); }
 function cyclePace(){
@@ -706,36 +743,25 @@ function renderDashboard(){
   }
 
   const spendPctRaw = income>0 ? spent/income : 0;
-  const spendPct = Math.min(spendPctRaw, 1);
   const { daysLeft, pacePct } = cyclePace();
 
-  const spendCirc = 276.46, paceCirc = 351.86;
-  const spendEl = document.getElementById('gaugeSpend');
-  const paceEl = document.getElementById('gaugePace');
-  spendEl.setAttribute('stroke-dasharray', spendCirc);
-  spendEl.setAttribute('stroke-dashoffset', spendCirc - spendPct*spendCirc);
-  spendEl.style.stroke = spendPctRaw > 1 ? 'var(--red)' : 'var(--teal)';
-  paceEl.setAttribute('stroke-dasharray', paceCirc);
-  paceEl.setAttribute('stroke-dashoffset', paceCirc - Math.min(pacePct,1)*paceCirc);
+  // Hero card: how much of this cycle's budget has been spent — drives the
+  // progress bar, the "X% of budget" readout, and the spent-so-far line.
+  // (This replaces the old circular-gauge/dial-cluster rendering, which
+  // referenced SVG elements removed during the bank-app redesign — that
+  // dead code threw on every render and silently broke everything below
+  // it, including the category list, transaction list, and badges.)
+  const budgetPctRaw = budget>0 ? spent/budget : 0;
+  const barFillEl = document.getElementById('heroBarFill');
+  barFillEl.style.width = Math.min(budgetPctRaw,1)*100 + '%';
+  barFillEl.style.background = budgetPctRaw > 1 ? 'var(--red)' : 'var(--teal)';
 
   const gaugePctEl = document.getElementById('gaugePct');
-  gaugePctEl.textContent = Math.round(spendPctRaw*100)+'%';
-  gaugePctEl.style.color = spendPctRaw > 1 ? 'var(--red)' : 'var(--text)';
+  gaugePctEl.textContent = Math.round(budgetPctRaw*100)+'% of budget';
+  gaugePctEl.style.color = budgetPctRaw > 1 ? 'var(--red)' : 'var(--text)';
+  document.getElementById('heroSubSpent').textContent = fmt(spent) + ' spent';
 
-  // Flanking instrument dials — days-to-payday (fills as the cycle elapses)
-  // and savings contributed this cycle (fills toward the savings budget).
-  const miniCirc = 188.5;
-  const paydayRing = document.getElementById('dialPaydayRing');
-  paydayRing.setAttribute('stroke-dasharray', miniCirc);
-  paydayRing.setAttribute('stroke-dashoffset', miniCirc - Math.min(pacePct,1)*miniCirc);
-  document.getElementById('dialPaydayNum').textContent = daysLeft;
-
-  const savingsBudgetTotal = totalSavingsBudget();
-  const savingsPct = savingsBudgetTotal>0 ? Math.min(savingsContrib/savingsBudgetTotal, 1) : (savingsContrib>0?1:0);
-  const savingsRing = document.getElementById('dialSavingsRing');
-  savingsRing.setAttribute('stroke-dasharray', miniCirc);
-  savingsRing.setAttribute('stroke-dashoffset', miniCirc - savingsPct*miniCirc);
-  document.getElementById('dialSavingsNum').textContent = fmt(savingsContrib);
+  document.getElementById('chipSaved').textContent = fmt(savingsContrib);
 
   const budgetPct = budget>0 ? spent/budget : 0;
   const paceBadge = document.getElementById('paceBadge');
@@ -1206,19 +1232,113 @@ function renderDebtTab(){
   }
 }
 
-document.getElementById('financeTabDebt').addEventListener('click', ()=>{
-  document.getElementById('financeTabDebt').classList.add('active');
-  document.getElementById('financeTabSavings').classList.remove('active');
-  document.getElementById('financePanelDebt').style.display = '';
-  document.getElementById('financePanelSavings').style.display = 'none';
+/* ============================================================
+   RENDER: LOANS (LENT OUT) TRACKER
+   ============================================================ */
+function renderLoanTab(){
+  const loaned = totalLoaned(), repaid = totalLoanRepaid(), remaining = totalLoanRemaining();
+  document.getElementById('loanSummary').innerHTML = `
+    <div class="hist-card"><div class="v">${fmt(loaned)}</div><div class="l">Total lent</div></div>
+    <div class="hist-card"><div class="v">${fmt(repaid)}</div><div class="l">Repaid</div></div>
+    <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Still owed to you</div></div>
+  `;
+
+  const listWrap = document.getElementById('loanList');
+  document.getElementById('loanTag').textContent = state.loans.length + ' tracked';
+  if(!state.loans.length){
+    listWrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No loans added yet.</div>';
+    return;
+  }
+  listWrap.innerHTML = '';
+  state.loans.forEach(loan=>{
+    const rem = remainingForLoan(loan);
+    const pct = loan.amount>0 ? Math.min(paidForLoan(loan.id)/loan.amount,1) : 0;
+    const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
+    const div = document.createElement('div');
+    div.className = 'debt-card';
+    div.innerHTML = `
+      <div class="debt-top">
+        <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(loan.borrower)}</div>
+        <div class="debt-amt">${rem<=0 ? '✅ Repaid' : fmt(rem)+' left'}</div>
+      </div>
+      <div class="debt-reason">${escapeHtml(loan.reason)||'—'}</div>
+      <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
+      <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
+      <div class="debt-actions">
+        ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
+        <button class="debt-btn-del" data-delloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
+      </div>
+    `;
+    listWrap.appendChild(div);
+  });
+  listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
+  listWrap.querySelectorAll('[data-delloan]').forEach(b=>b.addEventListener('click', async ()=>{
+    const repaidAmt = paidForLoan(b.dataset.delloan);
+    const msg = repaidAmt>0
+      ? `${b.dataset.name} has ${fmt(repaidAmt)} in logged repayments. Deleting it keeps those as regular extra income, just no longer tied to this loan. Continue?`
+      : `Delete "${b.dataset.name}"? This can't be undone.`;
+    const ok = await askConfirm('Delete loan?', msg);
+    if(!ok) return;
+    state.loans = state.loans.filter(l=>l.id!==b.dataset.delloan);
+    saveState(); renderAll();
+    showToast('Loan deleted');
+  }));
+}
+
+document.getElementById('addLoanBtn').addEventListener('click', ()=>{
+  const borrower = document.getElementById('newLoanBorrower').value.trim();
+  const reason = document.getElementById('newLoanReason').value.trim();
+  const amount = Number(document.getElementById('newLoanAmount').value);
+  if(!borrower){ showToast('Enter who you lent to'); return; }
+  if(!amount || amount<=0){ showToast('Enter a valid amount lent'); return; }
+  state.loans.push({ id: 'loan-'+Date.now(), borrower, reason, amount });
+  saveState(); renderAll();
+  document.getElementById('newLoanBorrower').value='';
+  document.getElementById('newLoanReason').value='';
+  document.getElementById('newLoanAmount').value='';
+  showToast('Loan added');
 });
-document.getElementById('financeTabSavings').addEventListener('click', ()=>{
-  document.getElementById('financeTabSavings').classList.add('active');
-  document.getElementById('financeTabDebt').classList.remove('active');
-  document.getElementById('financePanelSavings').style.display = '';
-  document.getElementById('financePanelDebt').style.display = 'none';
+
+const loanRepaySheet = document.getElementById('loanRepaySheet');
+let repayingLoanId = null;
+function openLoanRepaySheet(loanId){
+  repayingLoanId = loanId;
+  const loan = loanById(loanId);
+  document.getElementById('loanRepayTitle').textContent = 'Log repayment — ' + (loan ? loan.borrower : '');
+  document.getElementById('loanRepayAmount').value = '';
+  document.getElementById('loanRepayMethod').value = '';
+  document.getElementById('loanRepayDate').value = toDateInput(new Date());
+  activeSheet = loanRepaySheet; openSheetEl(loanRepaySheet);
+}
+document.getElementById('loanRepayCancelBtn').addEventListener('click', ()=>{ closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null; });
+document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
+  const amount = Number(document.getElementById('loanRepayAmount').value);
+  const method = document.getElementById('loanRepayMethod').value;
+  const date = document.getElementById('loanRepayDate').value || toDateInput(new Date());
+  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  const loan = loanById(repayingLoanId);
+  state.extraIncome.push({
+    id: Date.now(), amount, date, method,
+    source: (loan ? loan.borrower : 'Loan') + ' — repayment',
+    loanId: repayingLoanId
+  });
+  saveState(); renderAll();
+  closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null;
+  showToast('Repayment logged');
 });
-document.getElementById('financeTabDebt').classList.add('active');
+
+function setFinanceTab(which){
+  const tabs = {debt:'financeTabDebt', savings:'financeTabSavings', loans:'financeTabLoans'};
+  const panels = {debt:'financePanelDebt', savings:'financePanelSavings', loans:'financePanelLoans'};
+  Object.keys(tabs).forEach(k=>{
+    document.getElementById(tabs[k]).classList.toggle('active', k===which);
+    document.getElementById(panels[k]).style.display = k===which ? '' : 'none';
+  });
+}
+document.getElementById('financeTabDebt').addEventListener('click', ()=>setFinanceTab('debt'));
+document.getElementById('financeTabSavings').addEventListener('click', ()=>setFinanceTab('savings'));
+document.getElementById('financeTabLoans').addEventListener('click', ()=>setFinanceTab('loans'));
+setFinanceTab('debt');
 
 document.getElementById('stratAvalanche').addEventListener('click', ()=>{ state.debtStrategy='avalanche'; saveState(); renderAll(); });
 document.getElementById('stratSnowball').addEventListener('click', ()=>{ state.debtStrategy='snowball'; saveState(); renderAll(); });
@@ -1626,6 +1746,7 @@ function renderAll(){
   renderDashboard();
   renderSavingsTab();
   renderDebtTab();
+  renderLoanTab();
   renderHistory();
   renderSettings();
   const sel = document.getElementById('txCategory');
@@ -1707,6 +1828,27 @@ function parseVoiceTranscript(text, statusEl){
     (matchedCat ? ' · category: ' + matchedCat.name : ' · pick a category below');
 }
 
+// Auto-links a "Debt repayment" expense logged from the general form to a
+// specific creditor, so a single log-expense step is enough (previously
+// this only happened when logging via the dedicated Debt tracker, so a
+// payment logged here counted toward the budget total but never reduced
+// any individual debt's remaining balance).
+function refreshDebtLinkField(selectedDebtId){
+  const field = document.getElementById('txDebtLinkField');
+  const sel = document.getElementById('txDebtLink');
+  const isDebtCat = document.getElementById('txCategory').value === 'debt';
+  if(!isDebtCat || !state.debts.length){
+    field.style.display = 'none';
+    sel.innerHTML = '';
+    return;
+  }
+  field.style.display = '';
+  sel.innerHTML = '<option value="">Not linked to a specific debt</option>' +
+    state.debts.map(d=>`<option value="${d.id}">${escapeHtml(d.creditor)} (${fmt(remainingForDebt(d))} left)</option>`).join('');
+  sel.value = selectedDebtId || '';
+}
+document.getElementById('txCategory').addEventListener('change', ()=>refreshDebtLinkField());
+
 const addSheet = document.getElementById('addSheet');
 let editingTxId = null;
 document.getElementById('fabAdd').addEventListener('click', ()=>{
@@ -1720,6 +1862,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   document.getElementById('txDate').value = toDateInput(new Date());
   document.getElementById('voiceStatus').style.display = 'none';
   document.getElementById('txRecurring').checked = false;
+  refreshDebtLinkField();
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -1732,6 +1875,7 @@ function openEditTx(t){
   document.getElementById('txDesc').value = t.desc || '';
   document.getElementById('txDate').value = t.date;
   document.getElementById('txRecurring').checked = t.recurTemplateId != null;
+  refreshDebtLinkField(t.debtId);
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -1745,13 +1889,23 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
   if(!state.recurringTemplates) state.recurringTemplates = [];
 
+  // Only relevant when categoryId is 'debt' — the field is hidden (and its
+  // value ignored) for every other category, so this naturally clears any
+  // stale debtId if the category was changed away from Debt repayment.
+  const debtLinkVal = document.getElementById('txDebtLink').value;
+  const debtId = (categoryId === 'debt' && debtLinkVal) ? debtLinkVal : null;
+
   let t;
   if(editingTxId != null){
     t = state.transactions.find(x=>x.id===editingTxId);
-    if(t){ Object.assign(t, {amount, categoryId, method, desc, date}); }
+    if(t){
+      Object.assign(t, {amount, categoryId, method, desc, date});
+      if(debtId) t.debtId = debtId; else delete t.debtId;
+    }
     showToast('Expense updated');
   } else {
     t = {id: Date.now(), amount, categoryId, desc, date, method};
+    if(debtId) t.debtId = debtId;
     state.transactions.push(t);
     showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
   }
@@ -2602,14 +2756,19 @@ function hideLoadingScreen(){
 async function doLogin(){
   const pw = document.getElementById('lockPasswordInput').value;
   const errEl = document.getElementById('lockError');
+  const btn = document.getElementById('lockSubmitBtn');
   if(!pw){ errEl.textContent = 'Enter your password'; return; }
+  if(btn.disabled) return; // a check is already in flight — ignore repeat taps/Enter
   errEl.textContent = 'Checking…';
+  btn.disabled = true;
+  const originalBtnText = btn.textContent;
+  btn.textContent = 'Checking…';
   try{
-    const res = await fetch(API_URL, {
+    const res = await fetchWithTimeout(API_URL, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({action:'login', password: pw})
-    });
+    }, 15000);
     const data = await res.json();
     if(data && data.sessionToken){
       sessionToken = data.sessionToken;
@@ -2621,7 +2780,12 @@ async function doLogin(){
       errEl.textContent = (data && data.error) || 'Incorrect password';
     }
   }catch(e){
-    errEl.textContent = 'Could not reach backend — check your connection';
+    errEl.textContent = e.name === 'AbortError'
+      ? 'Request timed out — check your connection and try again'
+      : 'Could not reach backend — check your connection';
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalBtnText;
   }
 }
 document.getElementById('lockSubmitBtn').addEventListener('click', doLogin);
