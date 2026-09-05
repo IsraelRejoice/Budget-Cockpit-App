@@ -11,6 +11,7 @@ const DEFAULT_CATEGORIES = [
   {id:'health', name:'Health / Medical', group:'Needs', budget:0, threshold:0.90, icon:'🏥'},
   {id:'family', name:'Family support', group:'Needs', budget:0, threshold:0.90, icon:'👪'},
   {id:'debt', name:'Debt repayment', group:'Needs', budget:0, threshold:0.95, icon:'💳'},
+  {id:'lend', name:'Money Lent Out', group:'Wants', budget:0, threshold:0.90, icon:'🤝'},
   {id:'care', name:'Personal care', group:'Wants', budget:0, threshold:0.85, icon:'🧴'},
   {id:'clothing', name:'Clothing', group:'Wants', budget:0, threshold:0.85, icon:'👕'},
   {id:'ent', name:'Entertainment', group:'Wants', budget:0, threshold:0.80, icon:'🎬'},
@@ -245,6 +246,12 @@ async function loadState(){
   if(state.debtFocusId == null) state.debtFocusId = '';
   if(!state.loans) state.loans = [];
   if(!state.loanPaidAccumulated) state.loanPaidAccumulated = {};
+  // Existing accounts already have a saved categories list from the server,
+  // which predates this category — add it once so it shows up for
+  // returning users too, not just brand-new accounts.
+  if(!state.categories.find(c=>c.id==='lend')){
+    state.categories.push({id:'lend', name:'Money Lent Out', group:'Wants', budget:0, threshold:0.90, icon:'🤝'});
+  }
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
@@ -725,7 +732,6 @@ function renderDashboard(){
   document.getElementById('cycleLabel').textContent = cycleLabelText();
   setTextFlash('statIncome', fmt(income));
   setTextFlash('statSpent', fmt(spent));
-  setTextFlash('statRemaining', fmt(remaining));
 
   const compareEl = document.getElementById('spentCompare');
   const lastCycle = state.history[state.history.length-1];
@@ -772,7 +778,8 @@ function renderDashboard(){
 
   const remainingBudget = Math.max(budget - spent, 0);
   document.getElementById('daysLeft').textContent = daysLeft;
-  document.getElementById('safeToday').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
+  document.getElementById('safeToday').textContent = fmt(remaining);
+  document.getElementById('statSafePerDay').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
@@ -1847,7 +1854,33 @@ function refreshDebtLinkField(selectedDebtId){
     state.debts.map(d=>`<option value="${d.id}">${escapeHtml(d.creditor)} (${fmt(remainingForDebt(d))} left)</option>`).join('');
   sel.value = selectedDebtId || '';
 }
-document.getElementById('txCategory').addEventListener('change', ()=>refreshDebtLinkField());
+document.getElementById('txCategory').addEventListener('change', ()=>{ refreshDebtLinkField(); refreshLoanLinkField(); });
+
+// Same one-step idea as the debt link, but for money going OUT to a friend:
+// picking "Money Lent Out" lets you name who it's for right there, which
+// creates the actual Loan record — previously there was no lending
+// category at all, so this always ended up as a plain, untracked expense
+// with no way to later log a repayment against it.
+function refreshLoanLinkField(t){
+  const field = document.getElementById('txLoanLinkField');
+  const input = document.getElementById('txLoanLinkInput');
+  const label = document.getElementById('txLoanLinkLabel');
+  const isLendCat = document.getElementById('txCategory').value === 'lend';
+  if(!isLendCat){ field.style.display = 'none'; input.value=''; return; }
+  field.style.display = '';
+  if(t && t.loanId && loanById(t.loanId)){
+    // Already linked to a loan — this quick sheet only shows the link,
+    // renaming/re-amounting a loan happens on the Lent Out card itself
+    // so the two stay in sync from one place.
+    label.textContent = 'Linked loan';
+    input.value = loanById(t.loanId).borrower;
+    input.disabled = true;
+  } else {
+    label.textContent = 'Who are you lending to?';
+    input.value = '';
+    input.disabled = false;
+  }
+}
 
 const addSheet = document.getElementById('addSheet');
 let editingTxId = null;
@@ -1863,6 +1896,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   document.getElementById('voiceStatus').style.display = 'none';
   document.getElementById('txRecurring').checked = false;
   refreshDebtLinkField();
+  refreshLoanLinkField();
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -1876,6 +1910,7 @@ function openEditTx(t){
   document.getElementById('txDate').value = t.date;
   document.getElementById('txRecurring').checked = t.recurTemplateId != null;
   refreshDebtLinkField(t.debtId);
+  refreshLoanLinkField(t);
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -1894,6 +1929,8 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
   // stale debtId if the category was changed away from Debt repayment.
   const debtLinkVal = document.getElementById('txDebtLink').value;
   const debtId = (categoryId === 'debt' && debtLinkVal) ? debtLinkVal : null;
+  const loanBorrowerInput = document.getElementById('txLoanLinkInput');
+  const newLoanBorrowerName = (categoryId === 'lend' && !loanBorrowerInput.disabled) ? loanBorrowerInput.value.trim() : '';
 
   let t;
   if(editingTxId != null){
@@ -1901,13 +1938,22 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
     if(t){
       Object.assign(t, {amount, categoryId, method, desc, date});
       if(debtId) t.debtId = debtId; else delete t.debtId;
+      // loanId is intentionally left untouched here — a loan is only
+      // created at the moment a lend-out expense is first logged; editing
+      // one afterwards should adjust the loan on the Lent Out card itself,
+      // not silently re-point or duplicate the loan record.
     }
     showToast('Expense updated');
   } else {
     t = {id: Date.now(), amount, categoryId, desc, date, method};
     if(debtId) t.debtId = debtId;
+    if(newLoanBorrowerName){
+      const newLoan = {id: 'loan-'+Date.now(), borrower: newLoanBorrowerName, reason: desc||'', amount};
+      state.loans.push(newLoan);
+      t.loanId = newLoan.id;
+    }
     state.transactions.push(t);
-    showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
+    showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : newLoanBorrowerName ? 'Expense added and loan created' : 'Expense added');
   }
 
   // Keep the recurring template in sync with the checkbox: create one if
@@ -2757,9 +2803,13 @@ async function doLogin(){
   const pw = document.getElementById('lockPasswordInput').value;
   const errEl = document.getElementById('lockError');
   const btn = document.getElementById('lockSubmitBtn');
+  const spinner = document.getElementById('lockSpinner');
+  const checkingText = document.getElementById('lockCheckingText');
   if(!pw){ errEl.textContent = 'Enter your password'; return; }
   if(btn.disabled) return; // a check is already in flight — ignore repeat taps/Enter
-  errEl.textContent = 'Checking…';
+  errEl.textContent = '';
+  spinner.style.display = '';
+  checkingText.style.display = '';
   btn.disabled = true;
   const originalBtnText = btn.textContent;
   btn.textContent = 'Checking…';
@@ -2784,6 +2834,8 @@ async function doLogin(){
       ? 'Request timed out — check your connection and try again'
       : 'Could not reach backend — check your connection';
   }finally{
+    spinner.style.display = 'none';
+    checkingText.style.display = 'none';
     btn.disabled = false;
     btn.textContent = originalBtnText;
   }
