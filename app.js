@@ -1862,6 +1862,15 @@ function parseVoiceTranscript(text, statusEl){
   });
   if(matchedCat) document.getElementById('txCategory').value = matchedCat.id;
   document.getElementById('txDesc').value = text.charAt(0).toUpperCase() + text.slice(1);
+  // Setting .value on a <select> via JS does NOT fire a native 'change'
+  // event, so without this, picking up "debt"/"lend" by voice would leave
+  // the creditor/borrower linking field hidden — the transaction would
+  // save with the right category (so it'd show correctly in the Dashboard's
+  // category breakdown) but never create the linked Debt/Loan record. This
+  // was the actual bug: voice/quick-add bypassed the one place that reveals
+  // that field.
+  refreshDebtLinkField();
+  refreshLoanLinkField();
 
   statusEl.textContent = 'Heard: "' + text + '"' +
     (matchedAmount ? ' · amount ' + fmt(Number(matchedAmount)) : ' · no amount detected, check the field') +
