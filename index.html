@@ -139,7 +139,11 @@ body{min-height:100vh; padding-bottom:92px;}
 .hero-card::after{ /* subtle corner sheen */
   content:'';position:absolute;top:-40%;right:-15%;width:70%;height:140%;
   background:radial-gradient(circle, rgba(255,255,255,.10), transparent 60%);pointer-events:none;}
-.hero-lbl{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.02em;}
+.hero-lbl{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.02em;
+  display:flex;align-items:center;gap:6px;}
+.hero-hide-btn{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;
+  padding:2px 4px;line-height:1;opacity:.8;}
+.hero-hide-btn:hover{opacity:1;}
 .hero-num{font-family:'Space Grotesk',sans-serif;font-size:38px;font-weight:700;margin:4px 0 14px;letter-spacing:-.02em;
   color:var(--text);position:relative;}
 .hero-bar-track{height:8px;border-radius:6px;background:rgba(255,255,255,.16);overflow:hidden;position:relative;}
@@ -578,12 +582,12 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="h1" id="cycleLabel">Current pay cycle</div>
         <div class="clock-row" style="display:flex;align-items:center;gap:8px;margin-top:6px;">
           <div class="clock" id="liveClock" style="margin-top:0;">—</div>
-          <svg id="analogClockFace" width="30" height="30" viewBox="0 0 40 40" style="display:none;flex-shrink:0;" aria-label="Analog clock">
-            <circle class="clk-face" cx="20" cy="20" r="18" fill="none" stroke-width="2.5"/>
-            <circle class="clk-center" cx="20" cy="20" r="2"/>
-            <line id="clockHandHour" x1="20" y1="20" x2="20" y2="11" stroke-width="3" stroke-linecap="round"/>
-            <line id="clockHandMinute" x1="20" y1="20" x2="20" y2="7" stroke-width="2.5" stroke-linecap="round"/>
-            <line id="clockHandSecond" x1="20" y1="20" x2="20" y2="6" stroke-width="1.5"/>
+          <svg id="analogClockFace" width="38" height="38" viewBox="0 0 40 40" style="display:none;flex-shrink:0;" aria-label="Analog clock">
+            <circle class="clk-face" cx="20" cy="20" r="18" fill="none" stroke-width="3"/>
+            <circle class="clk-center" cx="20" cy="20" r="2.4"/>
+            <line id="clockHandHour" x1="20" y1="20" x2="20" y2="11" stroke-width="3.5" stroke-linecap="round"/>
+            <line id="clockHandMinute" x1="20" y1="20" x2="20" y2="7" stroke-width="3" stroke-linecap="round"/>
+            <line id="clockHandSecond" x1="20" y1="20" x2="20" y2="6" stroke-width="1.75"/>
           </svg>
           <button class="clock-style-btn" id="clockStyleBtn" type="button" aria-label="Switch clock style" title="Switch between digital and analog clock">🕐</button>
           <button class="clock-style-btn" id="clockThemeBtn" type="button" aria-label="Change clock theme" title="Change clock face theme" style="display:none;">🎨</button>
@@ -595,7 +599,9 @@ body{min-height:100vh; padding-bottom:92px;}
     </div>
 
     <div class="hero-card">
-      <div class="hero-lbl">Available this cycle</div>
+      <div class="hero-lbl">Available this cycle
+        <button class="hero-hide-btn" id="heroHideBtn" type="button" aria-label="Hide this balance" title="Hide just this balance">👁️</button>
+      </div>
       <div class="hero-num mono" id="safeToday">—</div>
       <div class="hero-bar-track"><div class="hero-bar-fill" id="heroBarFill"></div></div>
       <div class="hero-sub"><span id="heroSubSpent">—</span><span id="gaugePct">0% of budget</span></div>
