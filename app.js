@@ -252,6 +252,32 @@ async function loadState(){
   if(!state.categories.find(c=>c.id==='lend')){
     state.categories.push({id:'lend', name:'Money Lent Out', group:'Wants', budget:0, threshold:0.90, icon:'🤝'});
   }
+  // One-time cleanup: fold the old, pre-existing lending category (created
+  // before this app had a real one) into the new 'lend' category — moving
+  // its transactions over rather than orphaning them, then removing the
+  // now-redundant duplicate. Matches by name since the old one predates
+  // any special id; 'debt' is excluded from the match on purpose.
+  {
+    const oldLendCats = state.categories.filter(c=>c.id!=='lend' && c.id!=='debt' && /lend|loan/i.test(c.name));
+    if(oldLendCats.length){
+      const oldIds = new Set(oldLendCats.map(c=>c.id));
+      state.transactions.forEach(t=>{ if(oldIds.has(t.categoryId)) t.categoryId = 'lend'; });
+      state.categories = state.categories.filter(c=>!oldIds.has(c.id));
+    }
+  }
+  // Defensive: collapse any exact-id duplicate categories (e.g. two entries
+  // both id:'lend') that may have crept in from an earlier session/version —
+  // keeps the first occurrence of each id, drops the rest. Doesn't touch
+  // transactions, which reference categories by id, so this can't orphan
+  // any spending history.
+  {
+    const seenCatIds = new Set();
+    state.categories = state.categories.filter(c=>{
+      if(seenCatIds.has(c.id)) return false;
+      seenCatIds.add(c.id);
+      return true;
+    });
+  }
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
@@ -545,6 +571,27 @@ document.getElementById('privacyToggleBtn').addEventListener('click', ()=>{
   renderAll(); // fmt() checks privacyMode directly, so every figure app-wide updates in one pass
 });
 
+// A separate, narrower hide toggle for just the hero "Available this cycle"
+// balance — independent of the app-wide privacy mode above, for when you
+// want to keep everything else visible but hide only the headline number
+// (e.g. glancing at the app around someone without flashing your balance).
+let heroBalanceHidden = false;
+try{ heroBalanceHidden = localStorage.getItem('heroBalanceHidden') === '1'; }catch(e){}
+function applyHeroHideUI(){
+  const btn = document.getElementById('heroHideBtn');
+  if(!btn) return;
+  btn.textContent = heroBalanceHidden ? '🙈' : '👁️';
+  btn.title = heroBalanceHidden ? 'Show this balance' : 'Hide just this balance';
+}
+document.getElementById('heroHideBtn').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  heroBalanceHidden = !heroBalanceHidden;
+  try{ localStorage.setItem('heroBalanceHidden', heroBalanceHidden ? '1' : '0'); }catch(e){}
+  applyHeroHideUI();
+  renderDashboard();
+});
+applyHeroHideUI();
+
 let clockStyle = 'digital';
 try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
 const CLOCK_THEMES = ['classic','amber','teal','mono'];
@@ -778,7 +825,7 @@ function renderDashboard(){
 
   const remainingBudget = Math.max(budget - spent, 0);
   document.getElementById('daysLeft').textContent = daysLeft;
-  document.getElementById('safeToday').textContent = fmt(remaining);
+  document.getElementById('safeToday').textContent = heroBalanceHidden ? (state.currency||'₦') + '••••' : fmt(remaining);
   document.getElementById('statSafePerDay').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
 
   const grandTotal = budget + totalSavingsBudget();
@@ -1939,7 +1986,11 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
       t.loanId = newLoan.id;
     }
     state.transactions.push(t);
-    showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : newLoanBorrowerName ? 'Expense added and loan created' : 'Expense added');
+    if(newLoanBorrowerName){
+      showToast('✓ Loan created for ' + newLoanBorrowerName + ' — check the Lent Out tab');
+    } else {
+      showToast(isSavingsCat(categoryId) ? 'Added to savings — not counted as spending' : 'Expense added');
+    }
   }
 
   // Keep the recurring template in sync with the checkbox: create one if
