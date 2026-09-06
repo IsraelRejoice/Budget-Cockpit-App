@@ -1,4 +1,3 @@
-
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -298,7 +297,40 @@ async function loadState(){
   hideLoadingScreen();
 
   if(isDirty) trySyncNow(); // push anything queued from an earlier offline session
+  flushLoanDebtOps(); // same idea, for any loan/debt add/delete that didn't reach the backend yet
 }
+
+// Loans and Debts are persisted via small atomic add/delete calls (see
+// Code.gs) rather than as part of the general saveState blob, specifically
+// to avoid a stale background save from another open tab/device silently
+// overwriting a loan or debt that was just added elsewhere. This queue
+// makes that durable even if you're offline when you add/delete one —
+// the operation is retried automatically once back online, same idea as
+// the isDirty/local-mirror pattern above but for these two record types.
+let pendingLoanDebtOps = [];
+try{ pendingLoanDebtOps = JSON.parse(localStorage.getItem('pendingLoanDebtOps') || '[]'); }catch(e){}
+function saveLoanDebtOpsQueue(){
+  try{ localStorage.setItem('pendingLoanDebtOps', JSON.stringify(pendingLoanDebtOps)); }catch(e){}
+}
+function queueLoanDebtOp(action, payload){
+  pendingLoanDebtOps.push({action, payload});
+  saveLoanDebtOpsQueue();
+  flushLoanDebtOps();
+}
+async function flushLoanDebtOps(){
+  if(!API_URL || !navigator.onLine) return;
+  while(pendingLoanDebtOps.length){
+    const op = pendingLoanDebtOps[0];
+    try{
+      const data = await apiPost(op.action, op.payload);
+      if(!data || data.error) break; // backend busy or unreachable — stop, retry later
+      pendingLoanDebtOps.shift();
+      saveLoanDebtOpsQueue();
+    }catch(e){ break; }
+  }
+}
+window.addEventListener('online', flushLoanDebtOps);
+setInterval(flushLoanDebtOps, 30000);
 
 let saveTimer = null;
 function saveState(){
@@ -777,7 +809,11 @@ function renderDashboard(){
   const budget = totalBudget();
 
   document.getElementById('cycleLabel').textContent = cycleLabelText();
-  setTextFlash('statIncome', fmt(income));
+  // Income and the headline balance are grouped under the same "hide" toggle
+  // — if you're showing someone your budget/spending but not your income —
+  // while Budget and Spent stay visible either way, since those were never
+  // part of what this toggle was meant to hide.
+  setTextFlash('statIncome', heroBalanceHidden ? (state.currency||'₦') + '••••' : fmt(income));
   setTextFlash('statSpent', fmt(spent));
 
   const compareEl = document.getElementById('spentCompare');
@@ -1257,6 +1293,7 @@ function renderDebtTab(){
       state.debts = state.debts.filter(d=>d.id!==b.dataset.del);
       if(state.debtFocusId===b.dataset.del) state.debtFocusId = '';
       saveState(); renderAll();
+      queueLoanDebtOp('deleteDebt', {debtId: b.dataset.del});
       showToast('Debt deleted');
     }));
   }
@@ -1321,6 +1358,7 @@ function renderLoanTab(){
     if(!ok) return;
     state.loans = state.loans.filter(l=>l.id!==b.dataset.delloan);
     saveState(); renderAll();
+    queueLoanDebtOp('deleteLoan', {loanId: b.dataset.delloan});
     showToast('Loan deleted');
   }));
 }
@@ -1331,8 +1369,10 @@ document.getElementById('addLoanBtn').addEventListener('click', ()=>{
   const amount = Number(document.getElementById('newLoanAmount').value);
   if(!borrower){ showToast('Enter who you lent to'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount lent'); return; }
-  state.loans.push({ id: 'loan-'+Date.now(), borrower, reason, amount });
+  const newLoan = { id: 'loan-'+Date.now(), borrower, reason, amount };
+  state.loans.push(newLoan);
   saveState(); renderAll();
+  queueLoanDebtOp('addLoan', {loan: newLoan});
   document.getElementById('newLoanBorrower').value='';
   document.getElementById('newLoanReason').value='';
   document.getElementById('newLoanAmount').value='';
@@ -1391,8 +1431,10 @@ document.getElementById('addDebtBtn').addEventListener('click', ()=>{
   const interestRate = Number(document.getElementById('newDebtInterest').value) || 0;
   if(!creditor){ showToast('Enter who the debt is owed to'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount owed'); return; }
-  state.debts.push({ id: 'debt-'+Date.now(), creditor, reason, amount, interestRate });
+  const newDebt = { id: 'debt-'+Date.now(), creditor, reason, amount, interestRate };
+  state.debts.push(newDebt);
   saveState(); renderAll();
+  queueLoanDebtOp('addDebt', {debt: newDebt});
   document.getElementById('newDebtCreditor').value='';
   document.getElementById('newDebtReason').value='';
   document.getElementById('newDebtAmount').value='';
@@ -1993,6 +2035,7 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
       const newLoan = {id: 'loan-'+Date.now(), borrower: newLoanBorrowerName, reason: desc||'', amount};
       state.loans.push(newLoan);
       t.loanId = newLoan.id;
+      queueLoanDebtOp('addLoan', {loan: newLoan});
     }
     state.transactions.push(t);
     if(newLoanBorrowerName){
