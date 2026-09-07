@@ -1,3 +1,4 @@
+
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -2022,12 +2023,19 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
     if(t){
       Object.assign(t, {amount, categoryId, method, desc, date});
       if(debtId) t.debtId = debtId; else delete t.debtId;
-      // loanId is intentionally left untouched here — a loan is only
-      // created at the moment a lend-out expense is first logged; editing
-      // one afterwards should adjust the loan on the Lent Out card itself,
-      // not silently re-point or duplicate the loan record.
+      // If there's a name typed here and no valid existing link (either it
+      // never had one, or the loan it pointed to no longer exists), create
+      // the loan now — same one-step behavior as a fresh log. This is the
+      // recovery path: previously, editing silently ignored this field
+      // entirely, so a missed link could never be fixed from here.
+      if(newLoanBorrowerName && !(t.loanId && loanById(t.loanId))){
+        const newLoan = {id: 'loan-'+Date.now(), borrower: newLoanBorrowerName, reason: desc||'', amount};
+        state.loans.push(newLoan);
+        t.loanId = newLoan.id;
+        queueLoanDebtOp('addLoan', {loan: newLoan});
+      }
     }
-    showToast('Expense updated');
+    showToast(newLoanBorrowerName && t && t.loanId ? '✓ Expense updated and loan linked' : 'Expense updated');
   } else {
     t = {id: Date.now(), amount, categoryId, desc, date, method};
     if(debtId) t.debtId = debtId;
