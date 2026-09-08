@@ -462,10 +462,13 @@ function suggestedFocusDebt(){
 // but repayments live in extraIncome (incoming money) rather than
 // transactions (spending), since getting repaid isn't an expense.
 function loanById(id){ return state.loans.find(l=>l.id===id); }
+// Principal recovered — updated immediately when a repayment is logged
+// (see loanRepaySaveBtn below), not deferred to cycle-archive like Debt's
+// accumulator is. Only the portion of a repayment that's genuine profit
+// (paid back beyond what was originally lent) ever touches extraIncome —
+// getting your own principal back isn't income.
 function paidForLoan(loanId){
-  const accumulated = (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
-  const liveThisCycle = state.extraIncome.filter(x=>x.loanId===loanId).reduce((s,x)=>s+Number(x.amount),0);
-  return accumulated + liveThisCycle;
+  return (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
 }
 function remainingForLoan(loan){ return Math.max(Number(loan.amount) - paidForLoan(loan.id), 0); }
 function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
@@ -1398,14 +1401,29 @@ document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
   const date = document.getElementById('loanRepayDate').value || toDateInput(new Date());
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
   const loan = loanById(repayingLoanId);
-  state.extraIncome.push({
-    id: Date.now(), amount, date, method,
-    source: (loan ? loan.borrower : 'Loan') + ' — repayment',
-    loanId: repayingLoanId
-  });
+  // Split the payment: whatever's still owed on the principal is just your
+  // own money coming back (not income), so it only reduces the remaining
+  // balance directly. Only an amount paid back beyond the original principal
+  // — actual profit/interest — counts as extra income.
+  const owedBefore = loan ? remainingForLoan(loan) : amount;
+  const principalPortion = Math.min(amount, owedBefore);
+  const excessPortion = Math.max(amount - owedBefore, 0);
+  if(principalPortion > 0){
+    state.loanPaidAccumulated[repayingLoanId] = (state.loanPaidAccumulated[repayingLoanId]||0) + principalPortion;
+  }
+  if(excessPortion > 0){
+    state.extraIncome.push({
+      id: Date.now(), amount: excessPortion, date, method,
+      source: (loan ? loan.borrower : 'Loan') + ' — repayment (above what was lent)',
+      loanId: repayingLoanId
+    });
+  }
   saveState(); renderAll();
+  queueLoanDebtOp('adjustLoanPaid', {loanId: repayingLoanId, delta: principalPortion});
   closeSheetEl(loanRepaySheet); activeSheet=null; repayingLoanId=null;
-  showToast('Repayment logged');
+  showToast(excessPortion>0
+    ? `Repayment logged — ${fmt(excessPortion)} of that counted as income`
+    : 'Repayment logged');
 });
 
 function setFinanceTab(which){
@@ -2849,8 +2867,10 @@ document.getElementById('adjustSheetSaveBtn').addEventListener('click', ()=>{
     state.savingsAccumulated[adjustContext.id] = Math.max(val - contributed, 0);
   } else if(adjustContext.type==='debt'){
     state.debtPaidAccumulated[adjustContext.id] = Math.max((state.debtPaidAccumulated[adjustContext.id]||0) + val, 0);
+    queueLoanDebtOp('adjustDebtPaid', {debtId: adjustContext.id, delta: val});
   } else if(adjustContext.type==='loan'){
     state.loanPaidAccumulated[adjustContext.id] = Math.max((state.loanPaidAccumulated[adjustContext.id]||0) + val, 0);
+    queueLoanDebtOp('adjustLoanPaid', {loanId: adjustContext.id, delta: val});
   }
   saveState(); renderAll();
   closeSheetEl(adjustSheet); activeSheet=null; adjustContext=null;
