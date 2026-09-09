@@ -281,6 +281,7 @@ async function loadState(){
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
+  if(state.stateVersion == null) state.stateVersion = 0;
   if(!state.recurringTemplates) state.recurringTemplates = [];
   if(!state.currency) state.currency = '₦';
   if(!state.bills) state.bills = [];
@@ -357,12 +358,14 @@ function saveState(){
       if(data && !data.error){
         isDirty = false;
         if(data.conflictResolved && data.state){
-          // The backend auto-archived a cycle while this device was offline
-          // and had to filter our stale transactions out to protect History.
-          // Adopt its authoritative post-merge state instead of drifting.
+          // Something else changed on the server since this device's last
+          // sync — another tab, another device, or an auto-archive. Rather
+          // than blindly overwrite it (the old behavior, which is what was
+          // silently reverting logged repayments and category edits),
+          // adopt the current authoritative state instead.
           state = Object.assign(state, data.state);
           renderAll();
-          showToast('A cycle auto-archived while you were offline — synced up');
+          showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
         }
         saveLocalMirror(); updateSyncIndicator();
       }
@@ -383,7 +386,7 @@ function trySyncNow(){
       if(data.conflictResolved && data.state){
         state = Object.assign(state, data.state);
         renderAll();
-        showToast('A cycle auto-archived while you were offline — synced up');
+        showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
       } else {
         showToast('Back online — synced ✓');
       }
