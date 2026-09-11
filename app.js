@@ -319,16 +319,29 @@ function queueLoanDebtOp(action, payload){
   saveLoanDebtOpsQueue();
   flushLoanDebtOps();
 }
+// Re-entrancy guard: without this, calling flushLoanDebtOps() again while a
+// previous call is still awaiting its network response (e.g. the 30s
+// interval firing right as queueLoanDebtOp's own immediate call is still in
+// flight) let both invocations read the SAME still-queued operation before
+// either had shifted it off — sending it to the backend twice and creating
+// a genuine duplicate loan/debt row. Only one flush runs at a time now.
+let flushingLoanDebtOps = false;
 async function flushLoanDebtOps(){
-  if(!API_URL || !navigator.onLine) return;
-  while(pendingLoanDebtOps.length){
-    const op = pendingLoanDebtOps[0];
-    try{
-      const data = await apiPost(op.action, op.payload);
-      if(!data || data.error) break; // backend busy or unreachable — stop, retry later
-      pendingLoanDebtOps.shift();
-      saveLoanDebtOpsQueue();
-    }catch(e){ break; }
+  if(flushingLoanDebtOps || !API_URL || !navigator.onLine) return;
+  flushingLoanDebtOps = true;
+  try{
+    while(pendingLoanDebtOps.length){
+      const op = pendingLoanDebtOps[0];
+      try{
+        const data = await apiPost(op.action, op.payload);
+        if(!data || data.error) break; // backend busy or unreachable — stop, retry later
+        if(data.stateVersion != null) state.stateVersion = data.stateVersion;
+        pendingLoanDebtOps.shift();
+        saveLoanDebtOpsQueue();
+      }catch(e){ break; }
+    }
+  }finally{
+    flushingLoanDebtOps = false;
   }
 }
 window.addEventListener('online', flushLoanDebtOps);
@@ -366,6 +379,13 @@ function saveState(){
           state = Object.assign(state, data.state);
           renderAll();
           showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
+        } else if(data.stateVersion != null){
+          // Crucial: without recording the version this save just produced,
+          // the very next save would look stale to the backend (comparing
+          // against a version number that's already out of date) and get
+          // needlessly rejected — which is exactly what was causing the
+          // constant "synced with another tab" refresh even on a single tab.
+          state.stateVersion = data.stateVersion;
         }
         saveLocalMirror(); updateSyncIndicator();
       }
@@ -388,6 +408,7 @@ function trySyncNow(){
         renderAll();
         showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
       } else {
+        if(data.stateVersion != null) state.stateVersion = data.stateVersion;
         showToast('Back online — synced ✓');
       }
     }
@@ -488,6 +509,19 @@ function cyclePace(){
   elapsed = Math.min(Math.max(elapsed, 0), totalDays);
   const daysLeft = Math.max(totalDays - elapsed, 0);
   return { totalDays, elapsed, daysLeft, pacePct: elapsed/totalDays };
+}
+// Every logged record (transaction, loan, debt, extra income, bill, etc.)
+// gets an id built this way now — timestamp plus a short random suffix,
+// instead of a bare Date.now(). A bare timestamp collides if two records
+// are created in the same millisecond (a fast double-tap, a recurring
+// template firing several entries in a tight loop, or two nearly-simultaneous
+// atomic backend calls), and a collision means two different records
+// silently share one id — edits/deletes can then hit the wrong one, and on
+// the backend an idempotency check (see addLoanRow/addDebtRow) would treat
+// the second one as "already exists" and drop it entirely.
+function uniqueId(prefix){
+  const rand = Math.random().toString(36).slice(2, 8);
+  return (prefix ? prefix + '-' : '') + Date.now() + '-' + rand;
 }
 function escapeHtml(str){
   if(str==null) return '';
@@ -1376,7 +1410,7 @@ document.getElementById('addLoanBtn').addEventListener('click', ()=>{
   const amount = Number(document.getElementById('newLoanAmount').value);
   if(!borrower){ showToast('Enter who you lent to'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount lent'); return; }
-  const newLoan = { id: 'loan-'+Date.now(), borrower, reason, amount };
+  const newLoan = { id: uniqueId('loan'), borrower, reason, amount };
   state.loans.push(newLoan);
   saveState(); renderAll();
   queueLoanDebtOp('addLoan', {loan: newLoan});
@@ -1416,7 +1450,7 @@ document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
   }
   if(excessPortion > 0){
     state.extraIncome.push({
-      id: Date.now(), amount: excessPortion, date, method,
+      id: uniqueId(), amount: excessPortion, date, method,
       source: (loan ? loan.borrower : 'Loan') + ' — repayment (above what was lent)',
       loanId: repayingLoanId
     });
@@ -1453,7 +1487,7 @@ document.getElementById('addDebtBtn').addEventListener('click', ()=>{
   const interestRate = Number(document.getElementById('newDebtInterest').value) || 0;
   if(!creditor){ showToast('Enter who the debt is owed to'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount owed'); return; }
-  const newDebt = { id: 'debt-'+Date.now(), creditor, reason, amount, interestRate };
+  const newDebt = { id: uniqueId('debt'), creditor, reason, amount, interestRate };
   state.debts.push(newDebt);
   saveState(); renderAll();
   queueLoanDebtOp('addDebt', {debt: newDebt});
@@ -1483,7 +1517,7 @@ document.getElementById('debtPaySaveBtn').addEventListener('click', ()=>{
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
   const debt = debtById(payingDebtId);
   state.transactions.push({
-    id: Date.now(), amount, categoryId: 'debt',
+    id: uniqueId(), amount, categoryId: 'debt',
     desc: (debt ? debt.creditor : 'Debt') + ' — debt payment',
     date, method, debtId: payingDebtId
   });
@@ -1802,7 +1836,7 @@ document.getElementById('addBillBtn').addEventListener('click', ()=>{
   const dueDay = Math.min(Math.max(Number(document.getElementById('newBillDueDay').value)||1, 1), 28);
   if(!name){ showToast('Enter a bill name'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
-  state.bills.push({ id: 'bill-'+Date.now(), name, amount, dueDay });
+  state.bills.push({ id: uniqueId('bill'), name, amount, dueDay });
   saveState(); renderAll();
   document.getElementById('newBillName').value = '';
   document.getElementById('newBillAmount').value = '';
@@ -2050,7 +2084,7 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
       // recovery path: previously, editing silently ignored this field
       // entirely, so a missed link could never be fixed from here.
       if(newLoanBorrowerName && !(t.loanId && loanById(t.loanId))){
-        const newLoan = {id: 'loan-'+Date.now(), borrower: newLoanBorrowerName, reason: desc||'', amount};
+        const newLoan = {id: uniqueId('loan'), borrower: newLoanBorrowerName, reason: desc||'', amount};
         state.loans.push(newLoan);
         t.loanId = newLoan.id;
         queueLoanDebtOp('addLoan', {loan: newLoan});
@@ -2058,10 +2092,10 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
     }
     showToast(newLoanBorrowerName && t && t.loanId ? '✓ Expense updated and loan linked' : 'Expense updated');
   } else {
-    t = {id: Date.now(), amount, categoryId, desc, date, method};
+    t = {id: uniqueId(), amount, categoryId, desc, date, method};
     if(debtId) t.debtId = debtId;
     if(newLoanBorrowerName){
-      const newLoan = {id: 'loan-'+Date.now(), borrower: newLoanBorrowerName, reason: desc||'', amount};
+      const newLoan = {id: uniqueId('loan'), borrower: newLoanBorrowerName, reason: desc||'', amount};
       state.loans.push(newLoan);
       t.loanId = newLoan.id;
       queueLoanDebtOp('addLoan', {loan: newLoan});
@@ -2084,7 +2118,7 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
         const tpl = state.recurringTemplates.find(rt=>rt.id===t.recurTemplateId);
         if(tpl) Object.assign(tpl, {categoryId, desc, amount, method});
       } else {
-        const tplId = 'rt-' + Date.now();
+        const tplId = uniqueId('rt');
         state.recurringTemplates.push({id: tplId, categoryId, desc, amount, method});
         t.recurTemplateId = tplId;
       }
@@ -2172,7 +2206,7 @@ document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
   const date = document.getElementById('extraDate').value || toDateInput(new Date());
   if(!rawAmount || rawAmount<=0){ showToast('Enter a valid amount'); return; }
 
-  const entry = { id: Date.now(), source, date };
+  const entry = { id: uniqueId(), source, date };
   if(fromSym !== homeSym){
     if(!lastFxQuote || lastFxQuote.from !== currencyCodeFor(fromSym)){
       showToast('Still checking the exchange rate — wait a second and try again');
@@ -2237,7 +2271,7 @@ async function sendAiQuestion(){
   const input = document.getElementById('aiQuestion');
   const q = input.value.trim();
   if(!q) return;
-  state.aiHistory.push({id: Date.now(), role:'user', text:q});
+  state.aiHistory.push({id: uniqueId(), role:'user', text:q});
   input.value = '';
   renderAiChat();
   const thinkingId = Date.now()+1;
