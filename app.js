@@ -90,29 +90,37 @@ function refreshCycleDates(){
   state.nextPayDate = toDateInput(next);
 }
 
-let state = {
-  theme: 'dark',
-  income: 0,
-  email: '',
-  currency: '₦',
-  paydayDay: 25,
-  lastPayDate: '',
-  nextPayDate: '',
-  categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
-  savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
-  extraIncome: [],
-  transactions: [],
-  history: [],
-  debts: [],              // {id, creditor, reason, amount, interestRate}
-  debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
-  debtFocusId: '',         // used when debtStrategy === 'manual'
-  loans: [],               // {id, borrower, reason, amount} — money YOU lent out
-  loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
-  aiHistory: [],           // {id, role:'user'|'bot', text, error?}
-  personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
-  bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
-  shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
-};
+// Factory, not a shared literal — every caller (initial load, and the
+// lock/logout wipe below) needs its OWN fresh categories array. Handing
+// out a single shared object would mean wiping "state" on lock and then
+// logging back in could end up mutating the same array instance the app
+// started with.
+function freshState(){
+  return {
+    theme: 'dark',
+    income: 0,
+    email: '',
+    currency: '₦',
+    paydayDay: 25,
+    lastPayDate: '',
+    nextPayDate: '',
+    categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
+    savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
+    extraIncome: [],
+    transactions: [],
+    history: [],
+    debts: [],              // {id, creditor, reason, amount, interestRate}
+    debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
+    debtFocusId: '',         // used when debtStrategy === 'manual'
+    loans: [],               // {id, borrower, reason, amount} — money YOU lent out
+    loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
+    aiHistory: [],           // {id, role:'user'|'bot', text, error?}
+    personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
+    bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
+    shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
+  };
+}
+let state = freshState();
 
 const CURRENCY_OPTIONS = [
   {sym:'₦', code:'NGN', label:'₦ Naira'}, {sym:'$', code:'USD', label:'$ Dollar'}, {sym:'£', code:'GBP', label:'£ Pound'},
@@ -203,9 +211,33 @@ async function apiPost(action, payload){
   if(data && data.error === 'Unauthorized') onSessionInvalid();
   return data;
 }
+// Wipes the in-memory state (and re-renders, so the dashboard behind the
+// lock screen is blank rather than just visually covered — previously the
+// real numbers stayed sitting in the DOM, inspectable via devtools, the
+// whole time you were "locked out") and, when it's safe to, also wipes the
+// local mirror in localStorage.
+//
+// "Safe to" means: no unsynced local-only changes. If isDirty is true there
+// ARE edits that only exist in this mirror — deleting it here would
+// silently and permanently lose them. So in that case the mirror is left
+// on disk on purpose (it's re-loaded and pushed to the backend the next
+// time you log in, same as the existing offline-then-reconnect flow) and
+// only the on-screen state is blanked. Once there's nothing unsynced left,
+// there's no reason to keep an unencrypted copy of already-backed-up data
+// sitting in local storage, so it's cleared too.
+function lockDownLocalState(){
+  const hadUnsyncedChanges = isDirty;
+  state = freshState();
+  isDirty = false;
+  if(!hadUnsyncedChanges){
+    try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  }
+  renderAll();
+}
 function onSessionInvalid(){
   sessionToken = '';
   try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  lockDownLocalState();
   showLockScreen('Your session expired — please log in again.');
 }
 
@@ -2690,7 +2722,7 @@ document.getElementById('shareReportBtn').addEventListener('click', async ()=>{
     if(data && data.url){
       resultEl.innerHTML = `
         <div class="share-result">
-          <input type="text" readonly value="${data.url}" id="shareUrlInput">
+          <input type="text" readonly value="${escapeHtml(data.url)}" id="shareUrlInput">
           <button class="btn btn-primary" id="copyShareBtn" style="margin:0;">Copy link</button>
           <div class="share-result-note" style="margin-top:8px;">Anyone with this link can view a read-only snapshot of this report — no login needed. Expires in 7 days, or revoke it anytime from Settings → Shared links.</div>
         </div>`;
@@ -2715,7 +2747,16 @@ function loadJsPdf(){
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
     // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
-    s.integrity = 'sha384-REPLACE_WITH_HASH_FROM_SRIHASH_ORG';
+    // Real SHA-384, computed directly from jsPDF 2.5.1's own published
+    // npm package (dist/jspdf.umd.min.js) — cdnjs serves that same
+    // official build byte-for-byte, so this matches. The previous value
+    // here was a literal placeholder that was never filled in, which
+    // meant every PDF export silently failed: SRI checks are byte-exact,
+    // so a bogus hash makes the browser reject the script load outright.
+    // If the pinned version above (2.5.1) or the CDN URL ever changes,
+    // this hash must be regenerated to match — a stale hash breaks
+    // loading again, just as the placeholder did.
+    s.integrity = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
     s.crossOrigin = 'anonymous';
     s.onload = resolve;
     s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
@@ -2852,6 +2893,13 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
 
 function csvEscape(v){
   v = String(v==null ? '' : v);
+  // Formula-injection guard: a description like =HYPERLINK(...) or
+  // +cmd|'/c calc'!A1 gets interpreted as a live formula (not text) the
+  // moment this CSV is opened in Excel/Sheets/Numbers. Code.gs already
+  // guards against this on the way INTO the spreadsheet (sanitizeForSheet)
+  // — this is the same guard applied on the way OUT, since a CSV export is
+  // just as capable of carrying an active formula as a live sheet cell.
+  if(/^[=+\-@]/.test(v)) v = "'" + v;
   return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
 }
 document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
@@ -3068,6 +3116,7 @@ async function renderSharesList(){
 function lockNow(){
   sessionToken = '';
   try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  lockDownLocalState();
   showLockScreen('');
 }
 document.getElementById('lockNowBtn').addEventListener('click', ()=>{
