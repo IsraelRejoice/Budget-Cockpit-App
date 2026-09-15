@@ -4,7 +4,13 @@
 // with your backend — this only caches the app's own files, not
 // your transactions.
 
-const CACHE_NAME = 'budget-cockpit-v5';
+// BUMP THIS on every deploy that changes index.html/app.js. The 'activate'
+// handler below deletes every cache whose name doesn't match, so changing
+// this string is what actually evicts the previous version's files. Leaving
+// it unchanged after a deploy is the classic cause of "I shipped the fix but
+// the app still behaves like the old version" — which is exactly the
+// symptom pattern seen repeatedly on this project.
+const CACHE_NAME = 'budget-cockpit-v6';
 const APP_SHELL = [
   './',
   './index.html',
@@ -59,10 +65,33 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        // Only cache genuinely good responses. Previously EVERY response was
+        // cached, including 404s and 5xx: if a deploy briefly 404'd (GitHub
+        // Pages propagation lag, a mistyped path), that error page got stored
+        // as though it were the real file, and the next offline load would
+        // serve the cached error instead of the app — a "broken after deploy"
+        // state that persists until the cache is manually cleared.
+        // response.ok covers 200-299; type 'basic' keeps this to same-origin
+        // responses; status 206 (partial content) is excluded because a
+        // cached partial range would be served as if it were the whole file.
+        if (response && response.ok && response.type === 'basic' && response.status !== 206) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() =>
+        caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          // Offline with nothing cached for this exact URL. For a page
+          // navigation, fall back to the cached app shell so the PWA still
+          // opens (it reads its local mirror and works offline) instead of
+          // showing the browser's dinosaur/"no internet" page.
+          if (event.request.mode === 'navigate') {
+            return caches.match('./index.html').then((shell) => shell || caches.match('./'));
+          }
+          return Response.error();
+        })
+      )
   );
 });
