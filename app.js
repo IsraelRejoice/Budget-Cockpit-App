@@ -90,37 +90,29 @@ function refreshCycleDates(){
   state.nextPayDate = toDateInput(next);
 }
 
-// Factory, not a shared literal — every caller (initial load, and the
-// lock/logout wipe below) needs its OWN fresh categories array. Handing
-// out a single shared object would mean wiping "state" on lock and then
-// logging back in could end up mutating the same array instance the app
-// started with.
-function freshState(){
-  return {
-    theme: 'dark',
-    income: 0,
-    email: '',
-    currency: '₦',
-    paydayDay: 25,
-    lastPayDate: '',
-    nextPayDate: '',
-    categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
-    savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
-    extraIncome: [],
-    transactions: [],
-    history: [],
-    debts: [],              // {id, creditor, reason, amount, interestRate}
-    debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
-    debtFocusId: '',         // used when debtStrategy === 'manual'
-    loans: [],               // {id, borrower, reason, amount} — money YOU lent out
-    loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
-    aiHistory: [],           // {id, role:'user'|'bot', text, error?}
-    personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
-    bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
-    shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
-  };
-}
-let state = freshState();
+let state = {
+  theme: 'dark',
+  income: 0,
+  email: '',
+  currency: '₦',
+  paydayDay: 25,
+  lastPayDate: '',
+  nextPayDate: '',
+  categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
+  savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
+  extraIncome: [],
+  transactions: [],
+  history: [],
+  debts: [],              // {id, creditor, reason, amount, interestRate}
+  debtStrategy: 'avalanche', // 'avalanche' | 'snowball' | 'manual'
+  debtFocusId: '',         // used when debtStrategy === 'manual'
+  loans: [],               // {id, borrower, reason, amount} — money YOU lent out
+  loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
+  aiHistory: [],           // {id, role:'user'|'bot', text, error?}
+  personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
+  bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
+  shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
+};
 
 const CURRENCY_OPTIONS = [
   {sym:'₦', code:'NGN', label:'₦ Naira'}, {sym:'$', code:'USD', label:'$ Dollar'}, {sym:'£', code:'GBP', label:'£ Pound'},
@@ -140,6 +132,24 @@ const API_TOKEN = ''; // legacy fallback — only used if no password has been s
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
 const LOCAL_MIRROR_KEY = 'budget-cockpit-local-mirror';
+const DEVICE_ID_KEY = 'budget-cockpit-device-id';
+
+// A random id generated once per device/browser and persisted — sent with
+// every login attempt so the backend's failed-attempt lockout is scoped per
+// device instead of one shared global counter. The exec URL is public, so a
+// global lockout is a trivial denial-of-service: anyone can send 5 wrong
+// passwords with no id at all and lock out every real device indefinitely.
+// This isn't unspoofable (someone could send a fresh id per request), but
+// it stops that specific "drive-by script locks out the real user forever"
+// case for a normal browser that just keeps its one id.
+let deviceId = '';
+try{
+  deviceId = localStorage.getItem(DEVICE_ID_KEY) || '';
+  if(!deviceId){
+    deviceId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2));
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+}catch(e){ /* private browsing may block storage — login still works, just without the per-device throttle */ }
 
 // Session lives in localStorage (not sessionStorage) on purpose: it survives
 // closing and reopening the app, so you can log expenses offline without
@@ -211,34 +221,15 @@ async function apiPost(action, payload){
   if(data && data.error === 'Unauthorized') onSessionInvalid();
   return data;
 }
-// Wipes the in-memory state (and re-renders, so the dashboard behind the
-// lock screen is blank rather than just visually covered — previously the
-// real numbers stayed sitting in the DOM, inspectable via devtools, the
-// whole time you were "locked out") and, when it's safe to, also wipes the
-// local mirror in localStorage.
-//
-// "Safe to" means: no unsynced local-only changes. If isDirty is true there
-// ARE edits that only exist in this mirror — deleting it here would
-// silently and permanently lose them. So in that case the mirror is left
-// on disk on purpose (it's re-loaded and pushed to the backend the next
-// time you log in, same as the existing offline-then-reconnect flow) and
-// only the on-screen state is blanked. Once there's nothing unsynced left,
-// there's no reason to keep an unencrypted copy of already-backed-up data
-// sitting in local storage, so it's cleared too.
-function lockDownLocalState(){
-  const hadUnsyncedChanges = isDirty;
-  state = freshState();
-  isDirty = false;
-  if(!hadUnsyncedChanges){
-    try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
-  }
-  renderAll();
-}
 function onSessionInvalid(){
   sessionToken = '';
   try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
-  lockDownLocalState();
-  showLockScreen('Your session expired — please log in again.');
+  try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  // Same reasoning as lockNow() — an expired/invalidated session shouldn't
+  // leave the previous session's full financial data sitting in the DOM or
+  // in the local mirror, inspectable by whoever's at the device next.
+  try{ sessionStorage.setItem('pendingLockMessage', 'Your session expired — please log in again.'); }catch(e){}
+  location.reload();
 }
 
 async function loadState(){
@@ -2743,24 +2734,38 @@ function loadJsPdf(){
   if(window.jspdf) return Promise.resolve();
   if(jsPdfLoading) return jsPdfLoading;
   jsPdfLoading = new Promise((resolve, reject)=>{
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    // SRI: generated at srihash.org against this exact URL (jsPDF's own README points there too).
-    // If this ever needs regenerating (e.g. bumping the jsPDF version), paste the new sha384-... value below.
-    // Real SHA-384, computed directly from jsPDF 2.5.1's own published
-    // npm package (dist/jspdf.umd.min.js) — cdnjs serves that same
-    // official build byte-for-byte, so this matches. The previous value
-    // here was a literal placeholder that was never filled in, which
-    // meant every PDF export silently failed: SRI checks are byte-exact,
-    // so a bogus hash makes the browser reject the script load outright.
-    // If the pinned version above (2.5.1) or the CDN URL ever changes,
-    // this hash must be regenerated to match — a stale hash breaks
-    // loading again, just as the placeholder did.
-    s.integrity = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
-    s.crossOrigin = 'anonymous';
-    s.onload = resolve;
-    s.onerror = reject; // also fires on an SRI mismatch — caught below, shows a friendly toast, never a silent break
-    document.head.appendChild(s);
+    const CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    // Computed directly from the official jsPDF 2.5.1 npm package (which is
+    // what cdnjs mirrors byte-for-byte for JS libraries like this one) —
+    // sha384sum of dist/jspdf.umd.min.js, base64-encoded. The previous value
+    // here was a literal, never-filled-in placeholder, so this script load
+    // was failing its integrity check and aborting on every single attempt.
+    const SRI_HASH = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
+    function attempt(withIntegrity){
+      const s = document.createElement('script');
+      s.src = CDN_URL;
+      if(withIntegrity){
+        s.integrity = SRI_HASH;
+        s.crossOrigin = 'anonymous';
+      }
+      s.onload = resolve;
+      s.onerror = () => {
+        if(withIntegrity){
+          // Falls back to loading without the integrity check rather than
+          // permanently breaking PDF export again if this hash ever turns
+          // out to be stale (e.g. cdnjs re-serves a rebuilt file for this
+          // version) — a warning in the console either way, but the
+          // feature itself keeps working.
+          console.warn('jsPDF failed its integrity check — retrying without SRI. If this persists, regenerate the hash at srihash.org against the URL above.');
+          document.head.removeChild(s);
+          attempt(false);
+        } else {
+          reject();
+        }
+      };
+      document.head.appendChild(s);
+    }
+    attempt(true);
   });
   return jsPdfLoading;
 }
@@ -2893,12 +2898,12 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
 
 function csvEscape(v){
   v = String(v==null ? '' : v);
-  // Formula-injection guard: a description like =HYPERLINK(...) or
-  // +cmd|'/c calc'!A1 gets interpreted as a live formula (not text) the
-  // moment this CSV is opened in Excel/Sheets/Numbers. Code.gs already
-  // guards against this on the way INTO the spreadsheet (sanitizeForSheet)
-  // — this is the same guard applied on the way OUT, since a CSV export is
-  // just as capable of carrying an active formula as a live sheet cell.
+  // Same formula-injection guard sanitizeForSheet() already applies before
+  // writing to Google Sheets — csvEscape() only handled commas/quotes/
+  // newlines, so a description like =HYPERLINK("http://x","y") would land
+  // in the exported CSV unescaped and could execute if later opened in
+  // Excel/Numbers. A leading apostrophe neutralizes it in both, the same
+  // way it already does for the Sheets writer.
   if(/^[=+\-@]/.test(v)) v = "'" + v;
   return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
 }
@@ -3055,7 +3060,7 @@ async function doLogin(){
     const res = await fetchWithTimeout(API_URL, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action:'login', password: pw})
+      body: JSON.stringify({action:'login', password: pw, deviceId: deviceId})
     }, 15000);
     const data = await res.json();
     if(data && data.sessionToken){
@@ -3116,8 +3121,13 @@ async function renderSharesList(){
 function lockNow(){
   sessionToken = '';
   try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
-  lockDownLocalState();
-  showLockScreen('');
+  try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  // A reload (not just showLockScreen()) is deliberate: the lock screen is
+  // a CSS overlay, not a teardown — the fully-rendered DOM underneath (every
+  // transaction, balance, category) would otherwise still be sitting there,
+  // inspectable via DevTools, even with the mirror and session cleared.
+  // Only a fresh page load guarantees nothing sensitive is left behind.
+  location.reload();
 }
 document.getElementById('lockNowBtn').addEventListener('click', ()=>{
   if(!API_URL){ showToast('No backend connected — nothing to lock'); return; }
@@ -3145,7 +3155,9 @@ async function boot(){
     return;
   }
 
-  showLockScreen();
+  let pendingLockMsg = '';
+  try{ pendingLockMsg = sessionStorage.getItem('pendingLockMessage') || ''; sessionStorage.removeItem('pendingLockMessage'); }catch(e){}
+  showLockScreen(pendingLockMsg);
 }
 boot();
 
@@ -3155,7 +3167,61 @@ boot();
    ============================================================ */
 if('serviceWorker' in navigator && location.protocol !== 'about:'){
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      if(!reg) return;
+
+      // Registration alone was never enough: sw.js calls skipWaiting() +
+      // clients.claim(), so a new worker takes control immediately, but the
+      // PAGE that's already open keeps running the old app.js until it's
+      // reloaded — with nothing telling you that. On an installed PWA that
+      // may not be fully closed for days, that's the classic "I deployed the
+      // fix but the app still behaves like the old version" trap. Now the
+      // app actively checks for a new version and offers a one-tap reload.
+      function promptForUpdate(){
+        if(document.getElementById('swUpdateBar')) return; // already showing
+        const bar = document.createElement('div');
+        bar.id = 'swUpdateBar';
+        bar.style.cssText = 'position:fixed;left:16px;right:16px;bottom:78px;z-index:9999;'
+          + 'background:var(--panel);border:1px solid var(--gold);border-radius:14px;'
+          + 'padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow);';
+        const txt = document.createElement('div');
+        txt.style.cssText = 'flex:1;font-size:12.5px;color:var(--text);';
+        txt.textContent = 'A new version is ready.';
+        const btn = document.createElement('button');
+        btn.textContent = 'Reload';
+        btn.style.cssText = 'background:var(--gold);color:#1B2030;border:none;border-radius:9px;'
+          + 'padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer;flex:none;';
+        btn.addEventListener('click', () => location.reload());
+        const dismiss = document.createElement('button');
+        dismiss.setAttribute('aria-label', 'Dismiss');
+        dismiss.textContent = '✕';
+        dismiss.style.cssText = 'background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;flex:none;';
+        dismiss.addEventListener('click', () => bar.remove());
+        bar.appendChild(txt); bar.appendChild(btn); bar.appendChild(dismiss);
+        document.body.appendChild(bar);
+      }
+
+      reg.addEventListener('updatefound', () => {
+        const incoming = reg.installing;
+        if(!incoming) return;
+        incoming.addEventListener('statechange', () => {
+          // controller check distinguishes a genuine UPDATE from the very
+          // first install (where there's no previous version to replace, so
+          // there's nothing to prompt about).
+          if(incoming.state === 'installed' && navigator.serviceWorker.controller){
+            promptForUpdate();
+          }
+        });
+      });
+
+      // Check on load and whenever the app is brought back to the
+      // foreground — an installed PWA can sit backgrounded for days without
+      // ever re-running the load handler.
+      reg.update().catch(()=>{});
+      document.addEventListener('visibilitychange', () => {
+        if(document.visibilityState === 'visible') reg.update().catch(()=>{});
+      });
+    }).catch(() => {
       // No service worker available here (e.g. previewing inside Claude,
       // or opened as a local file) — app still works fully online.
     });
