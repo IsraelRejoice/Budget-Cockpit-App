@@ -10,7 +10,7 @@
 // it unchanged after a deploy is the classic cause of "I shipped the fix but
 // the app still behaves like the old version" — which is exactly the
 // symptom pattern seen repeatedly on this project.
-const CACHE_NAME = 'budget-cockpit-v6';
+const CACHE_NAME = 'budget-cockpit-v7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -52,7 +52,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // Network-first for the app's OWN files only, so the app shell loads fast
-// and works offline. Cross-origin requests (your Apps Script backend, the
+// and works offline. Cross-origin requests (your Supabase backend, the
 // AI assistant, quote/FX APIs) are deliberately left alone — intercepting
 // those caused save/load failures, since opaque cross-origin responses
 // don't cache reliably and were breaking the fetch chain.
