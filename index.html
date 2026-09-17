@@ -15,7 +15,7 @@
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src https://fonts.gstatic.com;
   img-src 'self' data:;
-  connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.quotable.io https://api.frankfurter.dev;
+  connect-src 'self' https://*.supabase.co https://api.quotable.io https://api.frankfurter.dev;
   object-src 'none';
   base-uri 'self';
   frame-ancestors 'self';
@@ -557,9 +557,11 @@ body{min-height:100vh; padding-bottom:92px;}
   <div class="lock-box">
     <div class="lock-icon">🔒</div>
     <div class="lock-title">Budget Cockpit</div>
-    <p class="lock-sub">Enter your password to continue</p>
+    <p class="lock-sub" id="lockSub">Log in to your budget</p>
+    <input type="email" id="lockEmailInput" class="lock-input" placeholder="Email" autocomplete="username" style="margin-bottom:8px;">
     <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
-    <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Unlock</button>
+    <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
+    <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
     <div class="lock-spinner" id="lockSpinner" style="display:none;"></div>
     <div class="lock-checking-text" id="lockCheckingText" style="display:none;">Checking your details…</div>
     <div class="lock-error" id="lockError"></div>
@@ -814,7 +816,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">What happens when I archive a cycle?</div>
         <div class="faq-a">Totals are saved to History, savings contributions fold into your lifetime accumulated total, a report is generated, and transactions/extra income reset. Category budgets and goals stay the same.</div></div>
       <div class="faq-item"><div class="faq-q">Can I share this app with someone else?</div>
-        <div class="faq-a">If you send them your HTML file as-is, they'd be reading and writing to your same Google Sheet — their data would mix into yours, not stay separate, and you would not get a distinct report for them. For someone else to use this properly, they need their own copy: their own Google Sheet, their own Apps Script deployment, and their own token pasted into their own copy of this file.</div></div>
+        <div class="faq-a">If you send them your HTML file as-is, they'd be reading and writing to your same database — their data would mix into yours, not stay separate, and you would not get a distinct report for them. For someone else to use this properly, they need their own copy: their own Supabase project, their own Edge Function deployment, and their own project URL and key pasted into their own copy of this file.</div></div>
       <div class="faq-item"><div class="faq-q">How do I edit or delete an expense I logged wrong?</div>
         <div class="faq-a">Tap any transaction row to edit it — the amount, category, method, description, and date can all be changed, and Save updates it in place instead of creating a duplicate. On mobile you can also swipe a row left to reveal quick Edit and Delete buttons. The ✕ button next to a transaction deletes it directly.</div></div>
       <div class="faq-item"><div class="faq-q">What are payment methods for, and do I have to use them?</div>
@@ -836,7 +838,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">Can I download or email my report?</div>
         <div class="faq-a">Both. "Copy text" copies a plain-text version. "Download PDF" generates a formatted document with charts. "Email it" opens your email app with the report pre-filled, addressed to whatever email you've set in Settings — you still have to hit send yourself, since a web page can't send email on its own.</div></div>
       <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used to train anything?</div>
-        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself via Code.gs, and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect.</div></div>
+        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself (the key lives as a secret on your own backend, never in this page), and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect.</div></div>
       <div class="faq-item"><div class="faq-q">Where does my AI conversation history go?</div>
         <div class="faq-a">It's saved in your own backend along with everything else, so it persists between visits. Use the 🗑 icon in the AI assistant header to clear it.</div></div>
       <div class="faq-item"><div class="faq-q">What's the "My own notes" box for?</div>
@@ -846,7 +848,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">Light or dark mode — does it matter which I use?</div>
         <div class="faq-a">Purely a preference, toggled from the header icon or Settings. Nothing about calculations, storage, or backend behavior changes between them.</div></div>
       <div class="faq-item"><div class="faq-q">I got a "could not save" or "unable to reach backend" message — what do I do?</div>
-        <div class="faq-a">First check you have a working internet connection. If it persists, confirm your Apps Script Web App is still deployed with "Anyone" access and that API_URL in the app matches your deployment's exec URL exactly. If you recently redeployed Apps Script, make sure you used "New version" under Manage deployments rather than creating a fresh deployment, which would change the URL.</div></div>
+        <div class="faq-a">First check you have a working internet connection. If it persists, open YOUR_FUNCTION_URL?action=version in a browser — it should return JSON. If it doesn't, the Edge Function isn't deployed or was deployed with JWT verification left on. Also confirm SUPABASE_URL and SUPABASE_ANON_KEY in app.js match Project Settings → API exactly.</div></div>
     </div>
 
     <div class="guide-block">
@@ -1012,7 +1014,7 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="section"><h2>Security</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;">
-        If you've set up a password in Code.gs, your login stays active on this device until you close the browser/app,
+        With a password set on your Supabase account, your login stays active on this device (it renews itself quietly in the background)
         or for the session length configured server-side. Lock immediately before handing your phone to someone else.
       </p>
       <button class="btn btn-ghost" id="lockNowBtn">Lock app now</button>
