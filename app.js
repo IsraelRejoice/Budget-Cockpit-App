@@ -127,21 +127,36 @@ function currencyCodeFor(sym){
 /* ============================================================
    BACKEND CONFIG
    ============================================================ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwW8NdhL066LtcUCYPrNuPesWF-87y-poiJ-T-04X5b6kGKzqnZt92qTtofabayooIN/exec';
-const API_TOKEN = ''; // legacy fallback — only used if no password has been set up in Code.gs
+/* ------------------------------------------------------------------
+   SUPABASE — fill these two in once (Supabase dashboard → Project
+   Settings → API). Both are safe to have in this public file: the URL
+   is public by design, and the anon key is a publishable key that can
+   do nothing on its own. Row Level Security enforces that every
+   person can only ever see their own rows; every request also goes
+   through the Edge Function, which checks the login on top of that.
+   ------------------------------------------------------------------ */
+const SUPABASE_URL      = 'https://zxfvtiovpjnuqpabkkvz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4ZnZ0aW92cGpudXFwYWJra3Z6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MDQ5MDMsImV4cCI6MjEwNTE4MDkwM30.YDuD_GuKX745jEL6qoKnXcAuY8Dlyv9n77xSrlPie_o
+';
+
+// Everything else in the app talks to this one endpoint, exactly as it
+// used to talk to the Apps Script exec URL. Same action names, same
+// JSON shapes — only the transport and the auth header changed.
+const API_URL   = SUPABASE_URL + '/functions/v1/api';
+const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
+const REFRESH_KEY = 'budget-cockpit-refresh';
+const EXPIRY_KEY  = 'budget-cockpit-session-expiry';
 const LOCAL_MIRROR_KEY = 'budget-cockpit-local-mirror';
 const DEVICE_ID_KEY = 'budget-cockpit-device-id';
 
-// A random id generated once per device/browser and persisted — sent with
-// every login attempt so the backend's failed-attempt lockout is scoped per
-// device instead of one shared global counter. The exec URL is public, so a
-// global lockout is a trivial denial-of-service: anyone can send 5 wrong
-// passwords with no id at all and lock out every real device indefinitely.
-// This isn't unspoofable (someone could send a fresh id per request), but
-// it stops that specific "drive-by script locks out the real user forever"
-// case for a normal browser that just keeps its one id.
+// A random id generated once per device/browser and persisted. Under the old
+// Apps Script backend this was sent with every login so the failed-attempt
+// lockout could be scoped per device (a global counter was a trivial denial
+// of service). Supabase Auth now rate-limits sign-in attempts on its own
+// side, so this is no longer sent with the login — it's kept only as a
+// stable per-device id for local preferences.
 let deviceId = '';
 try{
   deviceId = localStorage.getItem(DEVICE_ID_KEY) || '';
@@ -156,8 +171,74 @@ try{
 // needing a network round-trip just to log back in every time. Trade-off:
 // it persists until you explicitly "Lock app now" or it expires server-side
 // (12h) — use Lock now before handing the device to someone else.
-let sessionToken = '';
-try{ sessionToken = localStorage.getItem(SESSION_KEY) || ''; }catch(e){ /* private browsing may block storage */ }
+let sessionToken = '';       // Supabase access token (a short-lived JWT, ~1h)
+let refreshToken = '';       // Supabase refresh token (long-lived)
+let sessionExpiresAt = 0;    // epoch ms the access token stops being valid
+try{
+  sessionToken     = localStorage.getItem(SESSION_KEY) || '';
+  refreshToken     = localStorage.getItem(REFRESH_KEY) || '';
+  sessionExpiresAt = Number(localStorage.getItem(EXPIRY_KEY) || 0);
+}catch(e){ /* private browsing may block storage */ }
+
+function storeSession(data){
+  sessionToken = (data && data.access_token) || '';
+  refreshToken = (data && data.refresh_token) || refreshToken;
+  // expires_in is seconds. Subtract a minute so we refresh slightly early
+  // rather than discovering expiry mid-request.
+  const ttl = Number(data && data.expires_in) || 3600;
+  sessionExpiresAt = Date.now() + (ttl * 1000);
+  try{
+    localStorage.setItem(SESSION_KEY, sessionToken);
+    localStorage.setItem(REFRESH_KEY, refreshToken);
+    localStorage.setItem(EXPIRY_KEY, String(sessionExpiresAt));
+  }catch(e){}
+}
+function clearSession(){
+  sessionToken = ''; refreshToken = ''; sessionExpiresAt = 0;
+  try{
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(EXPIRY_KEY);
+  }catch(e){}
+}
+
+/* Supabase access tokens last about an hour, far less than the 12-hour
+   sessions the Apps Script backend issued. Without this, the app would drop
+   you back to the lock screen every hour — exactly the symptom this project
+   has fought before, just from a new cause. So: refresh proactively when the
+   token is nearly expired, and reactively if a request ever comes back
+   Unauthorized. The in-flight promise is shared, so ten queued requests
+   noticing an expired token at once trigger ONE refresh, not ten racing
+   ones (a duplicate-refresh storm can invalidate the token it just got). */
+let refreshInFlight = null;
+async function refreshSession(){
+  if(!refreshToken) return false;
+  if(refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async ()=>{
+    try{
+      const res = await fetchWithTimeout(AUTH_URL + '/token?grant_type=refresh_token', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
+        body: JSON.stringify({ refresh_token: refreshToken })
+      }, 15000);
+      const data = await res.json();
+      if(res.ok && data && data.access_token){ storeSession(data); return true; }
+      // A refresh token that the server rejects is dead — there is nothing to
+      // retry, so fall through and let the caller send us to the lock screen.
+      return false;
+    }catch(e){
+      // Network failure, not a rejected token. Keep the refresh token: the
+      // app is offline-first and will retry on the next request.
+      return null;
+    }finally{
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+function sessionNearlyExpired(){
+  return !!sessionToken && sessionExpiresAt > 0 && Date.now() > (sessionExpiresAt - 60000);
+}
 
 // isDirty = true means there are local changes not yet confirmed saved to
 // the backend (either never attempted, or the attempt failed/was offline).
@@ -200,30 +281,70 @@ async function fetchWithTimeout(url, options, timeoutMs){
 // Centralized request helpers — every backend call goes through these,
 // so auth (session/token) is attached consistently and a session that's
 // expired or invalid triggers the lock screen instead of silently failing.
-async function apiGet(action, extraParams){
-  let qs = '?action=' + encodeURIComponent(action);
-  if(sessionToken) qs += '&session=' + encodeURIComponent(sessionToken);
-  if(API_TOKEN) qs += '&token=' + encodeURIComponent(API_TOKEN);
-  if(extraParams) Object.keys(extraParams).forEach(k => qs += '&'+k+'='+encodeURIComponent(extraParams[k]));
-  const res = await fetchWithTimeout(API_URL + qs, undefined, 20000);
-  const data = await res.json();
-  if(data && data.error === 'Unauthorized') onSessionInvalid();
+function authHeaders(){
+  return {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': 'Bearer ' + (sessionToken || SUPABASE_ANON_KEY)
+  };
+}
+
+// One shared implementation for GET and POST, so the refresh-and-retry rule
+// can't drift between them. Order of events on an expired token:
+//   1. refresh proactively if we already know it's about to expire
+//   2. send the request
+//   3. if the backend still says Unauthorized, refresh ONCE and resend
+//   4. only if that also fails do we surrender the session and show the lock
+// Step 3 matters because the client's clock can be wrong — a device whose
+// time is off by hours would otherwise never refresh proactively and would
+// look like it was being logged out at random.
+async function apiRequest(action, opts){
+  opts = opts || {};
+  const send = async ()=>{
+    if(opts.method === 'POST'){
+      return await fetchWithTimeout(API_URL, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(Object.assign({action}, opts.payload || {}))
+      }, 20000);
+    }
+    let qs = '?action=' + encodeURIComponent(action);
+    if(opts.params) Object.keys(opts.params).forEach(k => qs += '&'+k+'='+encodeURIComponent(opts.params[k]));
+    return await fetchWithTimeout(API_URL + qs, {headers: authHeaders()}, 20000);
+  };
+
+  if(sessionNearlyExpired()) await refreshSession();
+
+  let res = await send();
+  let data = await res.json().catch(()=>null);
+
+  if(res.status === 401 || (data && data.error === 'Unauthorized')){
+    const refreshed = await refreshSession();
+    if(refreshed === true){
+      res = await send();
+      data = await res.json().catch(()=>null);
+    }
+    if(res.status === 401 || (data && data.error === 'Unauthorized')){
+      // refreshed === null means the refresh call itself couldn't reach the
+      // network. Treating that as "your session is invalid" would log you out
+      // for a flaky connection, which is precisely the failure mode this app
+      // has been bitten by before. Surface it as a normal sync failure and
+      // let the existing retry paths deal with it.
+      if(refreshed === null) return {error: 'Could not reach backend'};
+      onSessionInvalid();
+    }
+  }
   return data;
+}
+
+async function apiGet(action, extraParams){
+  return await apiRequest(action, {method: 'GET', params: extraParams});
 }
 async function apiPost(action, payload){
-  const body = Object.assign({action, token: API_TOKEN, session: sessionToken}, payload||{});
-  const res = await fetchWithTimeout(API_URL, {
-    method: 'POST',
-    headers: {'Content-Type': 'text/plain;charset=utf-8'}, // avoids a CORS preflight Apps Script doesn't handle
-    body: JSON.stringify(body)
-  }, 20000);
-  const data = await res.json();
-  if(data && data.error === 'Unauthorized') onSessionInvalid();
-  return data;
+  return await apiRequest(action, {method: 'POST', payload: payload});
 }
 function onSessionInvalid(){
-  sessionToken = '';
-  try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  clearSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
   // Same reasoning as lockNow() — an expired/invalidated session shouldn't
   // leave the previous session's full financial data sitting in the DOM or
@@ -472,7 +593,22 @@ function spendingCategories(){ return state.categories.filter(c=>c.group!=='Savi
 function savingsCategories(){ return state.categories.filter(c=>c.group==='Savings'); }
 
 function spentFor(catId){ return state.transactions.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
-function spentForIn(txs, catId){ return txs.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
+// One pass over all transactions, bucketed by category. Anywhere that needs
+// spentFor() for EVERY category in a loop (the dashboard alert count, the
+// category list, report generation) should build this once and look up by
+// id, rather than calling spentFor() per category — spentFor() itself
+// re-scans the full transactions array every time it's called, so doing
+// that inside a categories.forEach() turns an O(transactions) job into
+// O(categories × transactions) for no benefit, and it silently gets worse
+// as a cycle's transaction list grows. statusFor(cat) has the same problem
+// one level deeper (it calls spentFor(cat.id) internally) — use
+// statusForAmt(cat, spentMap[cat.id]||0) instead when a map is already at
+// hand.
+function spentByCategoryMap(){
+  const m = {};
+  state.transactions.forEach(t=>{ m[t.categoryId] = (m[t.categoryId]||0) + Number(t.amount); });
+  return m;
+}
 
 function totalSpent(){
   return state.transactions.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
@@ -491,6 +627,24 @@ function paidForDebt(debtId){
   const accumulated = (state.debtPaidAccumulated && state.debtPaidAccumulated[debtId]) || 0;
   const liveThisCycle = state.transactions.filter(t=>t.debtId===debtId).reduce((s,t)=>s+Number(t.amount),0);
   return accumulated + liveThisCycle;
+}
+// Same fix as spentByCategoryMap() above, for the same reason: renderDebtTab
+// needs "amount paid" for every debt at once (the summary totals, the focus
+// card, and every row in the list all need it), and paidForDebt() rescans
+// the full live transactions array every time it's called. Without this,
+// a render with N debts calls that full scan 4-5 times per debt (once via
+// totalDebtPaid(), again via activeDebts()/suggestedFocusDebt(), again for
+// the focus card, again per list row) — this builds the "amount paid" for
+// every debt in one pass instead.
+function paidByDebtMap(){
+  const live = {};
+  state.transactions.forEach(t=>{ if(t.debtId) live[t.debtId] = (live[t.debtId]||0) + Number(t.amount); });
+  const m = {};
+  state.debts.forEach(d=>{
+    const accumulated = (state.debtPaidAccumulated && state.debtPaidAccumulated[d.id]) || 0;
+    m[d.id] = accumulated + (live[d.id]||0);
+  });
+  return m;
 }
 function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
 function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
@@ -933,12 +1087,13 @@ function renderDashboard(){
   document.getElementById('budgetCheckVal').textContent = fmt(grandTotal) + (income>0 && !privacyMode ? ' (' + Math.round(grandTotal/income*100) + '% of income)' : '');
   bc.classList.toggle('over', income>0 && grandTotal > income);
 
+  const spentMap = spentByCategoryMap();
   let alerts = 0;
-  state.categories.forEach(c=>{ const st = statusFor(c); if(st.cls==='st-over' || st.cls==='st-near') alerts++; });
+  state.categories.forEach(c=>{ const st = statusForAmt(c, spentMap[c.id]||0); if(st.cls==='st-over' || st.cls==='st-near') alerts++; });
   document.getElementById('alertCount').textContent = alerts;
 
   renderExtraIncome();
-  renderCategoryList();
+  renderCategoryList(spentMap);
   renderTxPreview();
   renderStreakAndBadges();
   renderWeekdayChart();
@@ -1120,17 +1275,18 @@ function renderExtraIncome(){
   });
 }
 
-function renderCategoryList(){
+function renderCategoryList(spentMap){
+  spentMap = spentMap || spentByCategoryMap(); // callable standalone too
   const list = document.getElementById('catList');
   list.innerHTML = '';
   const cats = spendingCategories();
   document.getElementById('catTag').textContent = cats.length + ' tracked';
   cats.forEach(cat=>{
-    const spent = spentFor(cat.id);
+    const spent = spentMap[cat.id] || 0;
     const budget = effectiveBudget(cat);
     const rollover = rolloverAmount(cat);
     const pct = budget>0 ? Math.min(spent/budget,1) : (spent>0?1:0);
-    const status = statusFor(cat);
+    const status = statusForAmt(cat, spent);
     const rolloverNote = rollover>0 ? ` <span style="color:var(--teal);">(+${fmt(rollover)} rollover)</span>` : '';
     const div = document.createElement('div');
     div.className = 'cat';
@@ -1269,14 +1425,25 @@ function renderDebtTab(){
   document.getElementById('stratSnowball').classList.toggle('active', state.debtStrategy==='snowball');
   document.getElementById('stratManual').classList.toggle('active', state.debtStrategy==='manual');
 
-  const owed = totalDebtOwed(), paid = totalDebtPaid(), remaining = totalDebtRemaining();
+  const paidMap = paidByDebtMap();
+  const remainingFor = d => Math.max(Number(d.amount) - (paidMap[d.id]||0), 0);
+
+  const owed = totalDebtOwed();
+  const paid = state.debts.reduce((s,d)=>s+(paidMap[d.id]||0),0);
+  const remaining = Math.max(owed-paid,0);
   document.getElementById('debtSummary').innerHTML = `
     <div class="hist-card"><div class="v">${fmt(owed)}</div><div class="l">Total owed</div></div>
     <div class="hist-card"><div class="v">${fmt(paid)}</div><div class="l">Total paid</div></div>
     <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Remaining</div></div>
   `;
 
-  const focus = suggestedFocusDebt();
+  const active = state.debts.filter(d=>remainingFor(d)>0);
+  let focus = null;
+  if(active.length){
+    if(state.debtStrategy==='avalanche') focus = active.slice().sort((a,b)=>(Number(b.interestRate)||0)-(Number(a.interestRate)||0))[0];
+    else if(state.debtStrategy==='snowball') focus = active.slice().sort((a,b)=>remainingFor(a)-remainingFor(b))[0];
+    else focus = debtById(state.debtFocusId) || active[0];
+  }
   const focusWrap = document.getElementById('debtFocusCard');
   if(!focus){
     focusWrap.innerHTML = '<div class="debt-focus-empty">No active debt to focus on — add a debt below, or you\'re debt-free! 🎉</div>';
@@ -1284,8 +1451,8 @@ function renderDebtTab(){
     const why = state.debtStrategy==='avalanche' ? 'Highest interest rate (' + (focus.interestRate||0) + '%/yr) — clearing this first saves the most money over time.'
       : state.debtStrategy==='snowball' ? 'Smallest remaining balance — clearing this first builds momentum fastest.'
       : 'Manually selected as your current focus.';
-    const rem = remainingForDebt(focus);
-    const pct = focus.amount>0 ? Math.min(paidForDebt(focus.id)/focus.amount,1) : 0;
+    const rem = remainingFor(focus);
+    const pct = focus.amount>0 ? Math.min((paidMap[focus.id]||0)/focus.amount,1) : 0;
     focusWrap.innerHTML = `
       <div class="debt-focus-card">
         <div class="focus-badge">CURRENTLY SERVICING</div>
@@ -1311,8 +1478,8 @@ function renderDebtTab(){
   } else {
     listWrap.innerHTML = '';
     state.debts.forEach(debt=>{
-      const rem = remainingForDebt(debt);
-      const pct = debt.amount>0 ? Math.min(paidForDebt(debt.id)/debt.amount,1) : 0;
+      const rem = remainingFor(debt);
+      const pct = debt.amount>0 ? Math.min((paidMap[debt.id]||0)/debt.amount,1) : 0;
       const isFocused = focus && focus.id===debt.id;
       const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
       const div = document.createElement('div');
@@ -1348,7 +1515,7 @@ function renderDebtTab(){
       state.debtFocusId = b.dataset.focus; saveState(); renderAll();
     }));
     listWrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
-      const paidAmt = paidForDebt(b.dataset.del);
+      const paidAmt = paidMap[b.dataset.del]||0;
       const msg = paidAmt>0
         ? `${b.dataset.name} has ${fmt(paidAmt)} in logged payments. Deleting it keeps those as regular Debt repayment expenses, just no longer tied to this creditor. Continue?`
         : `Delete "${b.dataset.name}"? This can't be undone.`;
@@ -2442,7 +2609,10 @@ function buildReportData(snapshot){
   const remaining = Math.max(income - spent - savingsContrib, 0);
   const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
 
-  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(txs,c.id), budget:c.budget }))
+  const catSpentMap = {};
+  txs.forEach(t=>{ catSpentMap[t.categoryId] = (catSpentMap[t.categoryId]||0) + Number(t.amount); });
+
+  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:catSpentMap[c.id]||0, budget:c.budget }))
     .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
 
   const byDay = {};
@@ -2450,8 +2620,15 @@ function buildReportData(snapshot){
   const dailyEntries = Object.keys(byDay).sort().map(d=>({date:d, amount:byDay[d]}));
   const highestDay = dailyEntries.slice().sort((a,b)=>b.amount-a.amount)[0];
 
-  const overBudget = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-over');
-  const nearLimit = snapshot ? [] : state.categories.filter(c => statusFor(c).cls==='st-near');
+  const overBudget = [];
+  const nearLimit = [];
+  if(!snapshot){
+    state.categories.forEach(c=>{
+      const st = statusForAmt(c, catSpentMap[c.id]||0);
+      if(st.cls==='st-over') overBudget.push(c);
+      else if(st.cls==='st-near') nearLimit.push(c);
+    });
+  }
 
   return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit, txs };
 }
@@ -2668,7 +2845,9 @@ function openYearReport(year){
   const remaining = Math.max(income - spent - savingsContrib, 0);
   const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
 
-  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:spentForIn(allTx,c.id), budget:0 }))
+  const yearSpentMap = {};
+  allTx.forEach(t=>{ yearSpentMap[t.categoryId] = (yearSpentMap[t.categoryId]||0) + Number(t.amount); });
+  const spentByCat = spendingCategories().map(c => ({ name:c.name, spent:yearSpentMap[c.id]||0, budget:0 }))
     .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent);
 
   // Bar chart here shows spend per archived cycle across the year, not per day
@@ -3026,14 +3205,16 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
 });
 
 /* ============================================================
-   LOCK SCREEN / LOGIN
+   LOCK SCREEN / LOGIN + SIGNUP
    ============================================================ */
+let lockMode = 'login'; // 'login' | 'signup'
+
 function showLockScreen(msg){
   hideLoadingScreen();
   document.getElementById('lockScreen').style.display = 'flex';
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
-  setTimeout(()=>document.getElementById('lockPasswordInput').focus(), 50);
+  setTimeout(()=>document.getElementById('lockEmailInput').focus(), 50);
 }
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
@@ -3042,35 +3223,104 @@ function hideLoadingScreen(){
   const el = document.getElementById('loadingScreen');
   if(el) el.style.display = 'none';
 }
+function setLockMode(mode){
+  lockMode = mode;
+  const sub = document.getElementById('lockSub');
+  const submitBtn = document.getElementById('lockSubmitBtn');
+  const toggleBtn = document.getElementById('lockToggleModeBtn');
+  const pwInput = document.getElementById('lockPasswordInput');
+  document.getElementById('lockError').textContent = '';
+  if(mode === 'signup'){
+    sub.textContent = 'Create your own private budget';
+    submitBtn.textContent = 'Create account';
+    toggleBtn.textContent = 'Already have an account? Log in';
+    pwInput.setAttribute('autocomplete', 'new-password');
+    pwInput.setAttribute('placeholder', 'Password (at least 6 characters)');
+  } else {
+    sub.textContent = 'Log in to your budget';
+    submitBtn.textContent = 'Log in';
+    toggleBtn.textContent = "New here? Create an account";
+    pwInput.setAttribute('autocomplete', 'current-password');
+    pwInput.setAttribute('placeholder', 'Password');
+  }
+}
+document.getElementById('lockToggleModeBtn').addEventListener('click', ()=>{
+  setLockMode(lockMode === 'login' ? 'signup' : 'login');
+});
+
 async function doLogin(){
+  const email = document.getElementById('lockEmailInput').value.trim();
   const pw = document.getElementById('lockPasswordInput').value;
   const errEl = document.getElementById('lockError');
   const btn = document.getElementById('lockSubmitBtn');
   const spinner = document.getElementById('lockSpinner');
   const checkingText = document.getElementById('lockCheckingText');
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
   if(!pw){ errEl.textContent = 'Enter your password'; return; }
+  if(lockMode === 'signup' && pw.length < 6){ errEl.textContent = 'Password must be at least 6 characters'; return; }
   if(btn.disabled) return; // a check is already in flight — ignore repeat taps/Enter
   errEl.textContent = '';
   spinner.style.display = '';
   checkingText.style.display = '';
+  checkingText.textContent = lockMode === 'signup' ? 'Creating your account…' : 'Checking your details…';
   btn.disabled = true;
   const originalBtnText = btn.textContent;
-  btn.textContent = 'Checking…';
+  btn.textContent = lockMode === 'signup' ? 'Creating…' : 'Checking…';
   try{
-    const res = await fetchWithTimeout(API_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action:'login', password: pw, deviceId: deviceId})
-    }, 15000);
-    const data = await res.json();
-    if(data && data.sessionToken){
-      sessionToken = data.sessionToken;
-      try{ localStorage.setItem(SESSION_KEY, sessionToken); }catch(e){}
-      errEl.textContent = '';
-      hideLockScreen();
-      loadState();
+    if(lockMode === 'signup'){
+      // Public Supabase Auth signup endpoint. This is what triggers the
+      // database's on_auth_user_created trigger (see schema.sql), which
+      // instantly gives this new account its own 16 default categories —
+      // nothing else needs to run for a brand-new person to have a usable
+      // budget straight away.
+      const res = await fetchWithTimeout(AUTH_URL + '/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
+        body: JSON.stringify({ email, password: pw })
+      }, 15000);
+      const data = await res.json();
+      if(res.ok && data && data.access_token){
+        // Email confirmation is OFF for this project — the new account is
+        // immediately usable.
+        storeSession(data);
+        errEl.textContent = '';
+        hideLockScreen();
+        loadState();
+      } else if(res.ok && data && data.id && !data.access_token){
+        // Email confirmation is ON — Supabase created the account but is
+        // waiting for the confirmation link to be clicked before issuing a
+        // session. This is a normal, successful outcome, not an error.
+        errEl.textContent = '';
+        setLockMode('login');
+        document.getElementById('lockError').innerHTML = 'Account created — check <b>' + escapeHtml(email) + '</b> for a confirmation link, then log in here.';
+      } else {
+        const raw = (data && (data.error_description || data.msg || data.error_code || data.error)) || '';
+        errEl.textContent = /already registered|user already exists/i.test(String(raw))
+          ? 'An account already exists for that email — try logging in instead.'
+          : (String(raw) || 'Could not create account');
+      }
     } else {
-      errEl.textContent = (data && data.error) || 'Incorrect password';
+      // Supabase Auth password grant.
+      const res = await fetchWithTimeout(AUTH_URL + '/token?grant_type=password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
+        body: JSON.stringify({ email, password: pw })
+      }, 15000);
+      const data = await res.json();
+      if(res.ok && data && data.access_token){
+        storeSession(data);
+        errEl.textContent = '';
+        hideLockScreen();
+        loadState();
+      } else {
+        // Supabase returns error_description / msg / error depending on the
+        // failure. Don't echo the raw message for a wrong password — it leaks
+        // whether the account exists.
+        const raw = (data && (data.error_description || data.msg || data.error_code || data.error)) || '';
+        errEl.textContent = /invalid login|invalid_grant|credentials|email not confirmed/i.test(String(raw))
+          ? (/not confirmed/i.test(String(raw)) ? 'Check your email for the confirmation link first' : 'Incorrect email or password')
+          : (String(raw) || 'Could not sign in');
+      }
     }
   }catch(e){
     errEl.textContent = e.name === 'AbortError'
@@ -3085,6 +3335,7 @@ async function doLogin(){
 }
 document.getElementById('lockSubmitBtn').addEventListener('click', doLogin);
 document.getElementById('lockPasswordInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('lockEmailInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 
 async function renderSharesList(){
   const wrap = document.getElementById('sharesList');
@@ -3119,8 +3370,20 @@ async function renderSharesList(){
 }
 
 function lockNow(){
-  sessionToken = '';
-  try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  // Best-effort server-side revoke so the refresh token can't be replayed
+  // from a copy of localStorage taken before the reload. Fire-and-forget:
+  // the local teardown below must happen whether or not this reaches the
+  // network, and it must not delay the reload.
+  if(sessionToken){
+    try{
+      fetch(AUTH_URL + '/logout', {
+        method: 'POST',
+        headers: {'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + sessionToken},
+        keepalive: true
+      }).catch(()=>{});
+    }catch(e){}
+  }
+  clearSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
   // A reload (not just showLockScreen()) is deliberate: the lock screen is
   // a CSS overlay, not a teardown — the fully-rendered DOM underneath (every
@@ -3140,6 +3403,14 @@ document.getElementById('lockNowBtn').addEventListener('click', ()=>{
 async function boot(){
   if(!API_URL){ loadState(); return; } // no backend configured — nothing to lock
   const mirror = loadLocalMirror();
+
+  // An access token that expired while the app was closed is normal, not a
+  // logout: if we still hold a refresh token, trade it for a fresh access
+  // token before deciding anything. Without this, reopening the app after an
+  // hour would land on the lock screen every single time.
+  if(!sessionToken && refreshToken && navigator.onLine){
+    await refreshSession();
+  }
 
   if(sessionToken){
     // Cached session (and, if offline, a local mirror to boot from) — go
