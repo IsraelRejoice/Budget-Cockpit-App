@@ -136,9 +136,7 @@ function currencyCodeFor(sym){
    through the Edge Function, which checks the login on top of that.
    ------------------------------------------------------------------ */
 const SUPABASE_URL      = 'https://zxfvtiovpjnuqpabkkvz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4ZnZ0aW92cGpudXFwYWJra3Z6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MDQ5MDMsImV4cCI6MjEwNTE4MDkwM30.YDuD_GuKX745jEL6qoKnXcAuY8Dlyv9n77xSrlPie_o';
-
-// Everything else in the app talks to this one endpoint, exactly as it
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4ZnZ0aW92cGpudXFwYWJra3Z6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MDQ5MDMsImV4cCI6MjEwNTE4MDkwM30.YDuD_GuKX745jEL6qoKnXcAuY8Dlyv9n77xSrlPie_o';// Everything else in the app talks to this one endpoint, exactly as it
 // used to talk to the Apps Script exec URL. Same action names, same
 // JSON shapes — only the transport and the auth header changed.
 const API_URL   = SUPABASE_URL + '/functions/v1/api';
