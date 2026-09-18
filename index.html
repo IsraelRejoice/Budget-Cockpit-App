@@ -497,6 +497,73 @@ body{min-height:100vh; padding-bottom:92px;}
   100%{ transform:translateY(100vh) rotate(360deg); opacity:0; }
 }
 
+/* Money Weather — a one-glance cycle-health readout, cockpit-themed */
+.weather-card{margin:12px 20px 0;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:14px 16px;display:flex;align-items:center;gap:12px;overflow:hidden;position:relative;}
+.weather-icon{font-size:28px;flex:none;line-height:1;filter:drop-shadow(0 0 6px rgba(255,255,255,.08));}
+.weather-icon.wx-clear{animation:wxSunPulse 3.5s ease-in-out infinite;}
+.weather-icon.wx-cloudy{animation:wxDrift 4.5s ease-in-out infinite;}
+.weather-icon.wx-storm{animation:wxFlash 1.6s steps(1) infinite;}
+.weather-body{flex:1;min-width:0;}
+.weather-headline{font-family:'Space Grotesk',sans-serif;font-size:13.5px;font-weight:700;color:var(--text);}
+.weather-sub{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;}
+@keyframes wxSunPulse{0%,100%{transform:scale(1) rotate(0deg);}50%{transform:scale(1.12) rotate(8deg);}}
+@keyframes wxDrift{0%,100%{transform:translateX(0);}50%{transform:translateX(3px);}}
+@keyframes wxFlash{0%,90%,100%{opacity:1;}92%,96%{opacity:.45;}}
+
+/* Live FX strip — reuses the app's existing rate lookup, just surfaced */
+.fx-strip{margin:10px 20px 0;display:flex;align-items:center;gap:6px;overflow-x:auto;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);padding-bottom:2px;}
+.fx-strip .fx-pill{flex:none;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+  padding:4px 9px;white-space:nowrap;}
+.fx-strip .fx-pill b{color:var(--text);}
+.fx-strip .fx-updated{flex:none;font-size:9.5px;color:var(--muted-2);margin-left:2px;}
+
+/* Category mood icons — reacts to how a category is doing, no extra cost:
+   the status was already computed for the bar color, this just displays it */
+.cat-mood{display:inline-block;margin-left:5px;font-size:12px;transform-origin:center;}
+.cat-mood.mood-ok{animation:moodBreathe 3s ease-in-out infinite;}
+.cat-mood.mood-near{animation:moodWobble 1.8s ease-in-out infinite;}
+.cat-mood.mood-over{animation:moodShake .5s ease-in-out infinite;}
+@keyframes moodBreathe{0%,100%{transform:scale(1);}50%{transform:scale(1.15);}}
+@keyframes moodWobble{0%,100%{transform:rotate(0deg);}25%{transform:rotate(-8deg);}75%{transform:rotate(8deg);}}
+@keyframes moodShake{0%,100%{transform:translateX(0);}25%{transform:translateX(-2px);}75%{transform:translateX(2px);}}
+
+/* Streak flame — grows and glows with a longer streak, no new stored field */
+.streak-flame{display:inline-block;transition:transform .3s, filter .3s;}
+.badge-pill.streak-tier-2 .streak-flame{transform:scale(1.15);filter:drop-shadow(0 0 3px rgba(255,150,50,.6));}
+.badge-pill.streak-tier-3 .streak-flame{transform:scale(1.3);filter:drop-shadow(0 0 6px rgba(255,110,30,.8));}
+.badge-pill.streak-best{border-color:var(--teal);box-shadow:0 0 8px rgba(0,229,199,.25);}
+
+/* Budget reaction overlay — a brief, non-blocking edge-glow after logging an
+   expense, giving quick positive/warning feedback without interrupting the
+   flow. pointer-events:none so it never blocks a tap underneath it. */
+.budget-reaction{position:fixed;inset:0;z-index:55;pointer-events:none;}
+.budget-reaction::before{content:'';position:absolute;inset:0;border-radius:0;
+  box-shadow:inset 0 0 0 0 transparent;}
+.budget-reaction-ok::before{animation:reactionGlowOk .8s ease-out forwards;}
+.budget-reaction-near::before{animation:reactionGlowNear .9s ease-out forwards;}
+.budget-reaction-over::before{animation:reactionGlowOver 1s ease-out forwards;}
+@keyframes reactionGlowOk{
+  0%{box-shadow:inset 0 0 0 0 rgba(0,229,199,0);}
+  30%{box-shadow:inset 0 0 40px 6px rgba(0,229,199,.35);}
+  100%{box-shadow:inset 0 0 0 0 rgba(0,229,199,0);}
+}
+@keyframes reactionGlowNear{
+  0%{box-shadow:inset 0 0 0 0 rgba(255,194,77,0);}
+  30%{box-shadow:inset 0 0 40px 6px rgba(255,194,77,.35);}
+  100%{box-shadow:inset 0 0 0 0 rgba(255,194,77,0);}
+}
+@keyframes reactionGlowOver{
+  0%{box-shadow:inset 0 0 0 0 rgba(255,59,48,0); transform:translateX(0);}
+  15%{transform:translateX(-4px);} 30%{transform:translateX(4px);} 45%{transform:translateX(0);}
+  35%{box-shadow:inset 0 0 45px 8px rgba(255,59,48,.4);}
+  100%{box-shadow:inset 0 0 0 0 rgba(255,59,48,0); transform:translateX(0);}
+}
+@media (prefers-reduced-motion: reduce){
+  .weather-icon,.cat-mood,.streak-flame,.budget-reaction::before{animation:none !important;}
+}
+
 .confirm-box{position:fixed;left:20px;right:20px;top:50%;transform:translate(0,-50%);max-width:400px;margin:0 auto;
   background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;z-index:41;
   box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .2s;}
@@ -616,11 +683,21 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
+    <div class="weather-card" id="moneyWeatherCard" style="display:none;">
+      <div class="weather-icon" id="weatherIcon">☀️</div>
+      <div class="weather-body">
+        <div class="weather-headline" id="weatherHeadline">—</div>
+        <div class="weather-sub" id="weatherSub">—</div>
+      </div>
+    </div>
+
     <div class="chip-row">
       <div class="chip"><div class="v mono" id="daysLeft">—</div><div class="l">To payday</div></div>
       <div class="chip"><div class="v mono" id="chipSaved">—</div><div class="l">Saved</div></div>
       <div class="chip"><div class="v mono" id="alertCount">—</div><div class="l">Alerts</div></div>
     </div>
+
+    <div class="fx-strip" id="fxStrip" style="display:none;"></div>
 
     <div class="payday-card">
       <div class="payday-row">
