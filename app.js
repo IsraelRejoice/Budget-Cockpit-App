@@ -135,8 +135,10 @@ function currencyCodeFor(sym){
    person can only ever see their own rows; every request also goes
    through the Edge Function, which checks the login on top of that.
    ------------------------------------------------------------------ */
-const SUPABASE_URL      = 'https://zxfvtiovpjnuqpabkkvz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4ZnZ0aW92cGpudXFwYWJra3Z6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MDQ5MDMsImV4cCI6MjEwNTE4MDkwM30.YDuD_GuKX745jEL6qoKnXcAuY8Dlyv9n77xSrlPie_o';// Everything else in the app talks to this one endpoint, exactly as it
+const SUPABASE_URL      = 'https://YOUR-PROJECT-REF.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR-ANON-PUBLIC-KEY';
+
+// Everything else in the app talks to this one endpoint, exactly as it
 // used to talk to the Apps Script exec URL. Same action names, same
 // JSON shapes — only the transport and the auth header changed.
 const API_URL   = SUPABASE_URL + '/functions/v1/api';
@@ -757,6 +759,19 @@ function celebrate(){
   }
 }
 
+// A brief, non-blocking edge-glow after logging an expense — quick visual
+// feedback on how that expense landed, without interrupting the flow or
+// requiring the person to go check a bar chart. 'ok'/'near'/'over' matches
+// the same statusForAmt() classes already used for category bar colors, so
+// this reuses a status the app was computing anyway rather than deriving
+// a second opinion.
+function triggerBudgetReaction(cls){
+  const el = document.createElement('div');
+  el.className = 'budget-reaction budget-reaction-' + cls;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 1100);
+}
+
 /* ============================================================
    THEME
    ============================================================ */
@@ -1096,6 +1111,8 @@ function renderDashboard(){
   renderWeekdayChart();
   renderTrendChart();
   renderBillReminders();
+  renderMoneyWeather(income, spent, budget, alerts);
+  renderFxStrip();
 }
 
 /* ============================================================
@@ -1111,10 +1128,30 @@ function loggingStreak(){
   while(days.has(toDateInput(d))){ streak++; d.setDate(d.getDate()-1); }
   return streak;
 }
+// Best streak ever is tracked client-side only (localStorage), deliberately
+// NOT added to the synced state object — it's a nice-to-have display detail,
+// not financial data, and keeping it out of state avoids adding a new field
+// to the save/sync/version-conflict model for something this minor.
+function bestStreakSeen(currentStreak){
+  let best = 0;
+  try{ best = Number(localStorage.getItem('budget-cockpit-best-streak')) || 0; }catch(e){}
+  if(currentStreak > best){
+    try{ localStorage.setItem('budget-cockpit-best-streak', String(currentStreak)); }catch(e){}
+    return { best: currentStreak, isNewBest: best>0 }; // don't flag day 1 ever logged as "new best"
+  }
+  return { best, isNewBest: false };
+}
 function computeBadges(){
   const badges = [];
   const streak = loggingStreak();
-  if(streak >= 3) badges.push({icon:'🔥', label: streak + '-day logging streak'});
+  if(streak >= 3){
+    const {isNewBest} = bestStreakSeen(streak);
+    const tier = streak>=14 ? 'streak-tier-3' : streak>=7 ? 'streak-tier-2' : 'streak-tier-1';
+    badges.push({
+      icon: '<span class="streak-flame">🔥</span>', label: streak + '-day logging streak' + (isNewBest?' — new best!':''),
+      cls: tier + (isNewBest?' streak-best':'')
+    });
+  }
   if(activeDebts().length===0 && state.debts.length>0) badges.push({icon:'🏆', label:'Debt-free!'});
   savingsCategories().forEach(c=>{
     if(c.goal>0 && lifetimeSaved(c.id) >= c.goal) badges.push({icon:'🎯', label: c.name+' goal hit'});
@@ -1133,7 +1170,7 @@ function renderStreakAndBadges(){
   const badges = computeBadges();
   if(!badges.length){ wrap.innerHTML = ''; wrap.style.display='none'; return; }
   wrap.style.display = 'flex';
-  wrap.innerHTML = badges.map(b=>`<span class="badge-pill">${b.icon} ${escapeHtml(b.label)}</span>`).join('');
+  wrap.innerHTML = badges.map(b=>`<span class="badge-pill${b.cls?' '+b.cls:''}">${b.icon} ${escapeHtml(b.label)}</span>`).join('');
 }
 
 /* ============================================================
@@ -1229,6 +1266,91 @@ function upcomingBills(withinDays){
     return { ...b, daysUntil };
   }).filter(b => b.daysUntil <= withinDays).sort((a,b)=>a.daysUntil-b.daysUntil);
 }
+// Pure decision logic, kept separate from the DOM writes below so it can be
+// tested directly — same pattern as statusForAmt() elsewhere in this file.
+function classifyMoneyWeather(overCount, alerts, spendPct){
+  if(overCount >= 2 || spendPct > 1.1){
+    return { icon:'⛈️', wxCls:'wx-storm', headline:'Storm warning',
+      sub: overCount>0 ? overCount + ' categor' + (overCount===1?'y':'ies') + ' over budget — worth a look.' : 'Spending is running well past budget this cycle.' };
+  }
+  if(overCount === 1 || alerts >= 2 || spendPct > 0.85){
+    return { icon:'⛅', wxCls:'wx-cloudy', headline:'Partly cloudy',
+      sub: 'On track overall, but a category or two is close to the edge.' };
+  }
+  return { icon:'☀️', wxCls:'wx-clear', headline:'Clear skies',
+    sub: spendPct>0 ? Math.round((1-spendPct)*100) + '% of budget still unspent — nice and steady.' : 'Nothing logged yet this cycle.' };
+}
+function renderMoneyWeather(income, spent, budget, alerts){
+  const card = document.getElementById('moneyWeatherCard');
+  const iconEl = document.getElementById('weatherIcon');
+  const headlineEl = document.getElementById('weatherHeadline');
+  const subEl = document.getElementById('weatherSub');
+  if(!card) return;
+  if(income<=0 && spent<=0){ card.style.display = 'none'; return; }
+  card.style.display = 'flex';
+
+  const overCount = state.categories.filter(c=>{
+    const b = effectiveBudget(c);
+    return c.group!=='Savings' && b>0 && spentFor(c.id) > b;
+  }).length;
+  const spendPct = budget>0 ? spent/budget : 0;
+  const wx = classifyMoneyWeather(overCount, alerts, spendPct);
+  iconEl.textContent = wx.icon;
+  iconEl.className = 'weather-icon ' + wx.wxCls;
+  headlineEl.textContent = wx.headline;
+  subEl.textContent = wx.sub;
+}
+
+// Live FX strip: reuses the exact same api.frankfurter.dev endpoint the
+// extra-income currency conversion already calls, just surfaced as a small
+// glanceable readout instead of only appearing when logging income. Cached
+// per calendar day in localStorage so a render doesn't refetch it —
+// exchange rates don't move fast enough to need more than that, and it
+// keeps this free API from being hit on every single render.
+async function renderFxStrip(){
+  const wrap = document.getElementById('fxStrip');
+  if(!wrap) return;
+  const home = currencyCodeFor(state.currency || '₦');
+  const targets = ['USD','GBP','EUR'].filter(c=>c!==home);
+  if(!targets.length){ wrap.style.display='none'; return; }
+
+  const today = toDateInput(new Date());
+  let cached = null;
+  try{ cached = JSON.parse(localStorage.getItem('budget-cockpit-fx-strip')||'null'); }catch(e){}
+  if(cached && cached.date===today && cached.home===home){
+    renderFxStripFrom(cached.rates, home, cached.date);
+    return;
+  }
+
+  try{
+    const results = await Promise.all(targets.map(async code=>{
+      const res = await fetch(`https://api.frankfurter.dev/v2/rate/${home}/${code}`);
+      if(!res.ok) throw new Error('rate fetch failed');
+      const data = await res.json();
+      return {code, rate: data.rate, date: data.date};
+    }));
+    const rates = {}; results.forEach(r=>{ rates[r.code]=r.rate; });
+    try{ localStorage.setItem('budget-cockpit-fx-strip', JSON.stringify({date: today, home, rates})); }catch(e){}
+    renderFxStripFrom(rates, home, results[0]?.date || today);
+  }catch(e){
+    // Offline or the rate API is briefly down — just hide the strip rather
+    // than show stale or broken numbers. Nothing else on the dashboard
+    // depends on this succeeding.
+    wrap.style.display = 'none';
+  }
+}
+function renderFxStripFrom(rates, home, date){
+  const wrap = document.getElementById('fxStrip');
+  if(!wrap) return;
+  const codes = Object.keys(rates);
+  if(!codes.length){ wrap.style.display='none'; return; }
+  wrap.style.display = 'flex';
+  const symFor = code => (CURRENCY_OPTIONS.find(c=>c.code===code)||{}).sym || code;
+  wrap.innerHTML = codes.map(code=>
+    `<span class="fx-pill">1 ${home} = <b>${Number(rates[code]).toFixed(4)}</b> ${symFor(code)}</span>`
+  ).join('') + `<span class="fx-updated">as of ${escapeHtml(date)}</span>`;
+}
+
 function renderBillReminders(){
   const wrap = document.getElementById('billReminders');
   if(!wrap) return;
@@ -1272,6 +1394,14 @@ function renderExtraIncome(){
   });
 }
 
+// A small animated "how's this category feeling" icon, purely derived from
+// the same status class barColor() already uses — no new computation, just
+// a second, more expressive way of showing the same information.
+function moodIconFor(cls){
+  const face = cls==='st-over' ? '😬' : cls==='st-near' ? '😅' : '😌';
+  const moodCls = cls==='st-over' ? 'mood-over' : cls==='st-near' ? 'mood-near' : 'mood-ok';
+  return ` <span class="cat-mood ${moodCls}">${face}</span>`;
+}
 function renderCategoryList(spentMap){
   spentMap = spentMap || spentByCategoryMap(); // callable standalone too
   const list = document.getElementById('catList');
@@ -1292,7 +1422,7 @@ function renderCategoryList(spentMap){
         <div style="display:flex;align-items:center;">
           <span class="status-light" style="background:${barColor(status)};box-shadow:0 0 6px ${barColor(status)};"></span>
           <div>
-            <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}</div>
+            <div class="cat-name">${cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat.name)}${moodIconFor(status.cls)}</div>
             <div class="cat-group">${escapeHtml(cat.group)}</div>
           </div>
         </div>
@@ -2316,6 +2446,20 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
   }
 
   saveState(); renderAll();
+
+  // Quick visual feedback on how this expense landed in its category —
+  // skipped for Savings categories, which already get their own goal-hit
+  // celebration elsewhere, and for debt/lend where "over budget" framing
+  // doesn't fit (paying down debt setting off a red flash sends the wrong
+  // message). Reuses statusForAmt(), the same status the bar colors use.
+  if(t && !isSavingsCat(t.categoryId) && t.categoryId!=='debt' && t.categoryId!=='lend'){
+    const cat = catById(t.categoryId);
+    if(cat){
+      const cls = statusForAmt(cat, spentFor(cat.id)).cls;
+      triggerBudgetReaction(cls==='st-over' ? 'over' : cls==='st-near' ? 'near' : 'ok');
+    }
+  }
+
   closeSheetEl(addSheet); activeSheet=null; editingTxId=null;
   document.getElementById('txAmount').value=''; document.getElementById('txDesc').value='';
 });
