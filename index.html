@@ -564,6 +564,29 @@ body{min-height:100vh; padding-bottom:92px;}
   .weather-icon,.cat-mood,.streak-flame,.budget-reaction::before{animation:none !important;}
 }
 
+/* PIN lock — a fast, local-only unlock layer after idle auto-lock. Visually
+   distinct from the full email/password lock-screen (different icon-free
+   header) so it's never mistaken for "you got logged out". */
+.pin-lock-screen{position:fixed;inset:0;z-index:101;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;padding:20px;}
+.pin-lock-box{width:100%;max-width:320px;text-align:center;}
+.pin-dots{display:flex;justify-content:center;gap:14px;margin:18px 0 6px;}
+.pin-dot{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line);background:transparent;
+  transition:background .15s, border-color .15s, transform .15s;}
+.pin-dot.filled{background:var(--gold);border-color:var(--gold);transform:scale(1.1);}
+.pin-error{min-height:16px;font-size:11.5px;color:var(--red);margin-bottom:6px;}
+.pin-dots.pin-shake{animation:pinShake .4s ease-in-out;}
+@keyframes pinShake{
+  0%,100%{transform:translateX(0);} 20%{transform:translateX(-8px);} 40%{transform:translateX(8px);}
+  60%{transform:translateX(-6px);} 80%{transform:translateX(6px);}
+}
+.pin-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;}
+.pin-keypad button{padding:16px 0;border-radius:14px;border:1px solid var(--line);background:var(--panel);
+  color:var(--text);font-size:19px;font-family:'JetBrains Mono',monospace;cursor:pointer;}
+.pin-keypad button:active{background:var(--panel-2);transform:scale(.96);}
+.pin-keypad button.pin-key-ghost{font-size:12px;font-family:'Space Grotesk',sans-serif;color:var(--muted);
+  background:transparent;border-color:transparent;}
+
 .confirm-box{position:fixed;left:20px;right:20px;top:50%;transform:translate(0,-50%);max-width:400px;margin:0 auto;
   background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;z-index:41;
   box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .2s;}
@@ -1095,8 +1118,57 @@ body{min-height:100vh; padding-bottom:92px;}
         or for the session length configured server-side. Lock immediately before handing your phone to someone else.
       </p>
       <button class="btn btn-ghost" id="lockNowBtn">Lock app now</button>
+
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:16px;">
+        Set a 6-digit PIN for a quick unlock after the app auto-locks from inactivity — faster than typing your full password every time.
+        A PIN is a convenience layer stored only on this device, not a replacement for your account password: after 5 wrong attempts, or
+        if you tap "Forgot PIN", it falls back to a full log-in.
+      </p>
+      <div id="pinStatusRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-ghost" id="pinSetupBtn">Set up a PIN</button>
+        <button class="btn btn-ghost" id="pinRemoveBtn" style="display:none;color:var(--red);">Remove PIN</button>
+        <span id="pinStatusText" style="font-size:11px;color:var(--muted);"></span>
+      </div>
     </div>
   </div>
+
+<div class="sheet-overlay" id="pinSetupOverlay" style="display:none;">
+  <div class="sheet" id="pinSetupSheet">
+    <div class="sheet-handle"></div>
+    <h3 id="pinSetupTitle">Set a 6-digit PIN</h3>
+    <p style="font-size:12px;color:var(--muted);margin:-6px 0 14px;" id="pinSetupSub">Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.</p>
+    <div class="pin-dots" id="pinSetupDots">
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+    </div>
+    <div class="pin-error" id="pinSetupError"></div>
+    <div class="pin-keypad" id="pinSetupKeypad">
+      <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+      <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
+      <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
+      <button class="pin-key-ghost" data-key="cancel">Cancel</button><button data-key="0">0</button><button data-key="back">⌫</button>
+    </div>
+  </div>
+</div>
+
+<div class="pin-lock-screen" id="pinLockScreen" style="display:none;">
+  <div class="pin-lock-box">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title">Welcome back</div>
+    <p class="lock-sub">Enter your PIN</p>
+    <div class="pin-dots" id="pinUnlockDots">
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+    </div>
+    <div class="pin-error" id="pinUnlockError"></div>
+    <div class="pin-keypad" id="pinUnlockKeypad">
+      <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+      <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
+      <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
+      <button class="pin-key-ghost" id="pinForgotBtn" data-key="forgot">Forgot?</button><button data-key="0">0</button><button data-key="back">⌫</button>
+    </div>
+  </div>
+</div>
 
 </div>
 
