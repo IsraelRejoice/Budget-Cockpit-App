@@ -2022,6 +2022,7 @@ function attachCatDrag(handle, div){
 }
 
 function renderSettings(){
+  refreshPinStatusUI();
   const curSel = document.getElementById('currencySelect');
   if(!curSel.options.length){
     curSel.innerHTML = CURRENCY_OPTIONS.map(c=>`<option value="${c.sym}">${escapeHtml(c.label)}</option>`).join('');
@@ -3426,6 +3427,7 @@ async function doLogin(){
         storeSession(data);
         errEl.textContent = '';
         hideLockScreen();
+        noteActivity();
         loadState();
       } else if(res.ok && data && data.id && !data.access_token){
         // Email confirmation is ON — Supabase created the account but is
@@ -3452,6 +3454,7 @@ async function doLogin(){
         storeSession(data);
         errEl.textContent = '';
         hideLockScreen();
+        noteActivity();
         loadState();
       } else {
         // Supabase returns error_description / msg / error depending on the
@@ -3509,6 +3512,187 @@ async function renderSharesList(){
     wrap.innerHTML = '<div class="empty-hist">Could not load shared links.</div>';
   }
 }
+
+/* ============================================================
+   PIN LOCK — auto-locks after 5 minutes of inactivity, unlocked with a
+   fast local 6-digit PIN instead of retyping your full email/password.
+   The PIN never leaves this device: it's hashed with SHA-256 and stored
+   only in localStorage, and never touches Supabase — it's a screen lock,
+   not a second factor on your account. "Lock app now" and 5 wrong PIN
+   attempts both still fall back to the full password login (see
+   lockNow() below), which stays the stronger option for when you're
+   actually handing the device to someone else rather than just stepping
+   away for a few minutes.
+   ============================================================ */
+const PIN_HASH_KEY = 'budget-cockpit-pin-hash';
+const IDLE_LOCK_MS = 5 * 60 * 1000;
+const PIN_MAX_ATTEMPTS = 5;
+
+async function hashPin(pin){
+  const data = new TextEncoder().encode('budget-cockpit-pin:' + pin);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function hasPinSet(){
+  try{ return !!localStorage.getItem(PIN_HASH_KEY); }catch(e){ return false; }
+}
+
+// Pure so it's directly testable: given when the last activity was, the
+// current time, and the threshold, should the app lock? No DOM, no state.
+function shouldIdleLock(lastActivityAt, now, thresholdMs){
+  return (now - lastActivityAt) >= thresholdMs;
+}
+
+let lastActivityAt = Date.now();
+function noteActivity(){ lastActivityAt = Date.now(); }
+['mousemove','keydown','touchstart','click','scroll'].forEach(evt=>{
+  document.addEventListener(evt, noteActivity, {passive:true});
+});
+
+function isUnlockedAndUsable(){
+  // Only idle-lock once someone's actually logged in and looking at the
+  // app — never on the login screen itself, and never mid-way through
+  // setting up a PIN (that would be a uniquely bad moment to lock them out).
+  return !!sessionToken
+    && document.getElementById('lockScreen').style.display !== 'flex'
+    && document.getElementById('pinLockScreen').style.display !== 'flex'
+    && document.getElementById('pinSetupOverlay').style.display !== 'flex';
+}
+function checkIdleLock(){
+  if(!isUnlockedAndUsable()) return;
+  if(shouldIdleLock(lastActivityAt, Date.now(), IDLE_LOCK_MS)) triggerIdleLock();
+}
+// A periodic check rather than one long setTimeout: mobile browsers
+// throttle timers heavily once a tab is backgrounded, so a single timer
+// set for "5 minutes from now" can't be trusted to fire on time. Checking
+// the actual elapsed time — both on this interval and again the moment the
+// tab becomes visible — is what makes this reliable after the app's been
+// backgrounded for a while, which is exactly the case that matters most.
+setInterval(checkIdleLock, 15000);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') checkIdleLock();
+});
+
+let pinFailCount = 0;
+function triggerIdleLock(){
+  if(!hasPinSet()){ lockNow(); return; } // no PIN configured — fall back to the full, stronger lock
+  pinFailCount = 0;
+  unlockBuffer = '';
+  resetPinDots('pinUnlockDots');
+  document.getElementById('pinUnlockError').textContent = '';
+  document.getElementById('pinLockScreen').style.display = 'flex';
+}
+
+function resetPinDots(dotsId){ updatePinDots(dotsId, 0); }
+function updatePinDots(dotsId, count){
+  document.querySelectorAll('#'+dotsId+' .pin-dot').forEach((d,i)=>d.classList.toggle('filled', i<count));
+}
+function shakeDots(dotsId){
+  const el = document.getElementById(dotsId);
+  el.classList.remove('pin-shake'); void el.offsetWidth; el.classList.add('pin-shake');
+}
+function refreshPinStatusUI(){
+  const has = hasPinSet();
+  document.getElementById('pinSetupBtn').textContent = has ? 'Change PIN' : 'Set up a PIN';
+  document.getElementById('pinRemoveBtn').style.display = has ? '' : 'none';
+  document.getElementById('pinStatusText').textContent = has
+    ? 'PIN lock is on — auto-locks after 5 min idle'
+    : 'No PIN set — inactivity falls back to the full login';
+}
+
+// ---- PIN setup (Settings → Security) ----
+let setupBuffer = '';
+let setupFirstEntry = null;
+function openPinSetup(){
+  setupBuffer = ''; setupFirstEntry = null;
+  document.getElementById('pinSetupTitle').textContent = 'Set a 6-digit PIN';
+  document.getElementById('pinSetupSub').textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
+  document.getElementById('pinSetupError').textContent = '';
+  resetPinDots('pinSetupDots');
+  document.getElementById('pinSetupOverlay').style.display = 'flex';
+}
+function closePinSetup(){
+  document.getElementById('pinSetupOverlay').style.display = 'none';
+  setupBuffer = ''; setupFirstEntry = null;
+}
+document.getElementById('pinSetupBtn').addEventListener('click', openPinSetup);
+document.getElementById('pinSetupKeypad').addEventListener('click', async (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  const key = btn.dataset.key;
+  if(key==='cancel'){ closePinSetup(); return; }
+  if(key==='back'){ setupBuffer = setupBuffer.slice(0,-1); updatePinDots('pinSetupDots', setupBuffer.length); return; }
+  if(!/^[0-9]$/.test(key) || setupBuffer.length>=6) return;
+  setupBuffer += key;
+  updatePinDots('pinSetupDots', setupBuffer.length);
+  if(setupBuffer.length!==6) return;
+
+  if(setupFirstEntry===null){
+    setupFirstEntry = setupBuffer; setupBuffer = '';
+    document.getElementById('pinSetupTitle').textContent = 'Confirm your PIN';
+    document.getElementById('pinSetupSub').textContent = 'Enter the same 6 digits again.';
+    setTimeout(()=>updatePinDots('pinSetupDots',0), 150);
+    return;
+  }
+  if(setupBuffer===setupFirstEntry){
+    const hash = await hashPin(setupBuffer);
+    try{ localStorage.setItem(PIN_HASH_KEY, hash); }catch(err){}
+    closePinSetup();
+    refreshPinStatusUI();
+    showToast('PIN set — the app will auto-lock after 5 min idle');
+  } else {
+    document.getElementById('pinSetupError').textContent = "Those didn't match — try again";
+    shakeDots('pinSetupDots');
+    setupFirstEntry = null; setupBuffer = '';
+    setTimeout(()=>{
+      document.getElementById('pinSetupTitle').textContent = 'Set a 6-digit PIN';
+      document.getElementById('pinSetupSub').textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
+      updatePinDots('pinSetupDots',0);
+    }, 450);
+  }
+});
+document.getElementById('pinRemoveBtn').addEventListener('click', async ()=>{
+  const ok = await askConfirm('Remove PIN?', "You'll go back to the full password log-in after inactivity instead of a quick PIN.");
+  if(!ok) return;
+  try{ localStorage.removeItem(PIN_HASH_KEY); }catch(e){}
+  refreshPinStatusUI();
+  showToast('PIN removed');
+});
+
+// ---- PIN unlock (the idle-lock screen itself) ----
+let unlockBuffer = '';
+document.getElementById('pinForgotBtn').addEventListener('click', ()=> lockNow());
+document.getElementById('pinUnlockKeypad').addEventListener('click', async (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  const key = btn.dataset.key;
+  if(key==='forgot') return; // its own listener above handles this
+  if(key==='back'){ unlockBuffer = unlockBuffer.slice(0,-1); updatePinDots('pinUnlockDots', unlockBuffer.length); return; }
+  if(!/^[0-9]$/.test(key) || unlockBuffer.length>=6) return;
+  unlockBuffer += key;
+  updatePinDots('pinUnlockDots', unlockBuffer.length);
+  if(unlockBuffer.length!==6) return;
+
+  const enteredHash = await hashPin(unlockBuffer);
+  unlockBuffer = '';
+  let stored = '';
+  try{ stored = localStorage.getItem(PIN_HASH_KEY) || ''; }catch(err){}
+
+  if(stored && enteredHash===stored){
+    pinFailCount = 0;
+    document.getElementById('pinLockScreen').style.display = 'none';
+    noteActivity();
+    return;
+  }
+  pinFailCount++;
+  shakeDots('pinUnlockDots');
+  setTimeout(()=>updatePinDots('pinUnlockDots',0), 150);
+  if(pinFailCount>=PIN_MAX_ATTEMPTS){
+    document.getElementById('pinUnlockError').textContent = 'Too many attempts — log in again';
+    setTimeout(()=>lockNow(), 900);
+  } else {
+    const left = PIN_MAX_ATTEMPTS - pinFailCount;
+    document.getElementById('pinUnlockError').textContent = 'Incorrect PIN (' + left + ' attempt' + (left===1?'':'s') + ' left)';
+  }
+});
 
 function lockNow(){
   // Best-effort server-side revoke so the refresh token can't be replayed
