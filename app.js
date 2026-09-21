@@ -1307,6 +1307,14 @@ function renderMoneyWeather(income, spent, budget, alerts){
 // per calendar day in localStorage so a render doesn't refetch it —
 // exchange rates don't move fast enough to need more than that, and it
 // keeps this free API from being hit on every single render.
+//
+// Quoted as "1 foreign currency = X home currency" (e.g. "1 $ = 1,500 ₦"),
+// not the other way around — that's the direction people actually think in
+// day to day, and it's what every forex board and bank display uses. The
+// API itself is asked for the rate in that same direction (code → home)
+// rather than fetching home → code and inverting the fraction client-side,
+// which would have compounded floating-point rounding on top of an
+// already-inverted number.
 async function renderFxStrip(){
   const wrap = document.getElementById('fxStrip');
   if(!wrap) return;
@@ -1324,7 +1332,7 @@ async function renderFxStrip(){
 
   try{
     const results = await Promise.all(targets.map(async code=>{
-      const res = await fetch(`https://api.frankfurter.dev/v2/rate/${home}/${code}`);
+      const res = await fetch(`https://api.frankfurter.dev/v2/rate/${code}/${home}`);
       if(!res.ok) throw new Error('rate fetch failed');
       const data = await res.json();
       return {code, rate: data.rate, date: data.date};
@@ -1346,8 +1354,14 @@ function renderFxStripFrom(rates, home, date){
   if(!codes.length){ wrap.style.display='none'; return; }
   wrap.style.display = 'flex';
   const symFor = code => (CURRENCY_OPTIONS.find(c=>c.code===code)||{}).sym || code;
+  // A large-magnitude quote (e.g. ₦1,500 to the dollar) reads far better
+  // with thousands separators and no decimal noise than four decimal
+  // places carried over from a sub-1 exchange fraction. toLocaleString
+  // with maximumFractionDigits:2 covers both large home currencies (NGN)
+  // and smaller ones (EUR-per-GBP-style pairs) sensibly without a special
+  // case per currency.
   wrap.innerHTML = codes.map(code=>
-    `<span class="fx-pill">1 ${home} = <b>${Number(rates[code]).toFixed(4)}</b> ${symFor(code)}</span>`
+    `<span class="fx-pill">1 ${symFor(code)} = <b>${Number(rates[code]).toLocaleString(undefined,{maximumFractionDigits:2})}</b> ${home}</span>`
   ).join('') + `<span class="fx-updated">as of ${escapeHtml(date)}</span>`;
 }
 
@@ -2571,16 +2585,43 @@ function renderAiChat(){
   const wrap = document.getElementById('aiChat');
   if(!state.aiHistory.length){
     wrap.innerHTML = '<div class="ai-empty">Ask me anything about this cycle — e.g. "Am I overspending on transport?" or "How much more can I save?"</div>';
-    return;
+  } else {
+    wrap.innerHTML = '';
+    state.aiHistory.forEach(msg=>{
+      const bubble = document.createElement('div');
+      bubble.className = 'ai-bubble ' + msg.role + (msg.error ? ' error' : '');
+      bubble.textContent = msg.text;
+      wrap.appendChild(bubble);
+    });
+    wrap.scrollTop = wrap.scrollHeight;
   }
-  wrap.innerHTML = '';
-  state.aiHistory.forEach(msg=>{
-    const bubble = document.createElement('div');
-    bubble.className = 'ai-bubble ' + msg.role + (msg.error ? ' error' : '');
-    bubble.textContent = msg.text;
-    wrap.appendChild(bubble);
+  renderAiChips();
+}
+// A handful of one-tap starting points, so the assistant doesn't just stare
+// back at an empty input box. Only shown before the first message — once a
+// real conversation is underway, suggested starters would just be clutter.
+// A couple are personalized from real data where it's available (the
+// biggest category, an active debt) rather than always being generic.
+function renderAiChips(){
+  const wrap = document.getElementById('aiChips');
+  if(!wrap) return;
+  if(state.aiHistory.length){ wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
+  const chips = ['How am I doing this cycle?', 'Where can I cut back?'];
+  const spentMap = spentByCategoryMap();
+  const topCat = spendingCategories()
+    .map(c=>({name:c.name, spent:spentMap[c.id]||0}))
+    .filter(x=>x.spent>0).sort((a,b)=>b.spent-a.spent)[0];
+  if(topCat) chips.push('Am I overspending on ' + topCat.name + '?');
+  if(activeDebts().length) chips.push('What\'s the fastest way to pay off my debt?');
+  chips.push('Any tips to boost my savings rate?');
+  wrap.style.display = 'flex';
+  wrap.innerHTML = chips.slice(0,4).map(c=>`<button class="ai-chip">${escapeHtml(c)}</button>`).join('');
+  wrap.querySelectorAll('.ai-chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('aiQuestion').value = btn.textContent;
+      sendAiQuestion();
+    });
   });
-  wrap.scrollTop = wrap.scrollHeight;
 }
 document.getElementById('askAiFab').addEventListener('click', ()=>{
   if(!API_URL){
@@ -2772,41 +2813,90 @@ function buildReportData(snapshot){
     });
   }
 
-  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit, txs };
+  return { income, spent, budget, savingsContrib, remaining, savingsRate, spentByCat, dailyEntries, highestDay, overBudget, nearLimit, txs,
+    editedCount: txs.filter(t=>t.updatedAt).length, totalCount: txs.length };
 }
 
+function padR(s, w){ s=String(s); return s.length>=w ? s.slice(0,w) : s+' '.repeat(w-s.length); }
+function padL(s, w){ s=String(s); return s.length>=w ? s.slice(0,w) : ' '.repeat(w-s.length)+s; }
 function generateReportText(d, periodLabel, note){
-  const lines = [];
-  lines.push('BUDGET COCKPIT — REPORT');
-  lines.push(periodLabel || ('Cycle: ' + cycleLabelText()));
-  lines.push('Generated: ' + new Date().toLocaleString('en-GB'));
-  if(note) lines.push(note);
-  lines.push('');
-  lines.push('INCOME & SPENDING');
-  lines.push('Total income: ' + fmt(d.income));
-  lines.push('Total spent (excludes savings contributions): ' + fmt(d.spent));
-  lines.push('Total budgeted: ' + fmt(d.budget));
-  lines.push('Savings/Emergency Fund contributed: ' + fmt(d.savingsContrib) + ' (' + d.savingsRate + '% of income)');
-  lines.push('Remaining to spend: ' + fmt(d.remaining));
-  lines.push('');
-  lines.push('TOP SPENDING CATEGORIES');
-  if(d.spentByCat.length===0) lines.push('No expenses logged this period.');
-  d.spentByCat.slice(0,3).forEach((x,i)=> lines.push((i+1) + '. ' + x.name + ': ' + fmt(x.spent) + (x.budget>0 ? ' of ' + fmt(x.budget) + ' budgeted' : ' (no budget set)')));
-  lines.push('');
-  if(d.highestDay) lines.push('Highest single-day spend: ' + d.highestDay.date + ' (' + fmt(d.highestDay.amount) + ')');
-  lines.push('');
-  lines.push('ALERTS');
-  lines.push(d.overBudget.length ? 'Over budget: ' + d.overBudget.map(c=>c.name).join(', ') : 'No categories over budget.');
-  lines.push(d.nearLimit.length ? 'Near limit: ' + d.nearLimit.map(c=>c.name).join(', ') : 'No categories near their limit.');
-  lines.push('');
-  lines.push('SUGGESTIONS');
+  const L = [];
+  const rule = '='.repeat(70), thin = '-'.repeat(70);
+  const genAt = new Date();
+  const ref = 'BC-' + genAt.toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+
+  L.push(rule);
+  L.push(padR('BUDGET COCKPIT', 40) + padL('PERSONAL FINANCIAL STATEMENT', 30));
+  L.push(rule);
+  L.push('Statement Reference : ' + ref);
+  L.push('Statement Period    : ' + (periodLabel || ('Cycle: ' + cycleLabelText())));
+  L.push('Generated           : ' + genAt.toLocaleString('en-GB'));
+  if(note) L.push('Note                : ' + note);
+  L.push(thin);
+  L.push('');
+  L.push('SUMMARY');
+  L.push(thin);
+  L.push(padR('Total income', 40) + padL(fmt(d.income), 26));
+  L.push(padR('Total expenditure (excl. savings)', 40) + padL(fmt(d.spent), 26));
+  L.push(padR('Total budgeted', 40) + padL(fmt(d.budget), 26));
+  L.push(padR('Savings / Emergency Fund contributed', 40) + padL(fmt(d.savingsContrib) + ' (' + d.savingsRate + '%)', 26));
+  L.push(thin);
+  L.push(padR('Balance remaining', 40) + padL(fmt(d.remaining), 26));
+  L.push('');
+
+  const items = (d.txs||[]).slice().sort((a,b)=> String(a.date||'').localeCompare(String(b.date||'')) || String(a.id).localeCompare(String(b.id)));
+  L.push('TRANSACTION DETAIL (' + items.length + (items.length===1?' entry':' entries') + ')');
+  L.push(thin);
+  if(items.length===0){
+    L.push('No transactions recorded this period.');
+  } else {
+    L.push(padR('Date',12) + padR('Description',24) + padR('Category',18) + padL('Amount',12));
+    items.forEach(t=>{
+      const cat = catById(t.categoryId);
+      L.push(padR(t.date||'—',12) + padR(t.desc||'(no description)',24) + padR(cat?cat.name:'Uncategorized',18) + padL(fmt(t.amount),12) + (t.updatedAt ? '  *' : ''));
+    });
+  }
+  L.push('');
+
+  L.push('CATEGORY SUBTOTALS');
+  L.push(thin);
+  if(d.spentByCat.length===0){
+    L.push('No expenditure logged this period.');
+  } else {
+    d.spentByCat.forEach(x=> L.push(padR(x.name,40) + padL(fmt(x.spent),26)));
+  }
+  L.push('');
+
+  if(d.highestDay) L.push('Highest single-day spend : ' + d.highestDay.date + '  (' + fmt(d.highestDay.amount) + ')');
+  L.push('Over budget               : ' + (d.overBudget.length ? d.overBudget.map(c=>c.name).join(', ') : 'none'));
+  L.push('Near limit                : ' + (d.nearLimit.length ? d.nearLimit.map(c=>c.name).join(', ') : 'none'));
+  L.push('');
+
+  L.push('SUGGESTIONS');
+  L.push(thin);
   const suggestions = [];
   if(d.savingsRate < 20 && d.income>0) suggestions.push('Savings rate is below the commonly-cited 20% baseline — consider trimming ' + (d.spentByCat[0] ? d.spentByCat[0].name : 'your largest category') + ' next cycle.');
   if(d.overBudget.length) suggestions.push('Set a firm cap or cut back next cycle on: ' + d.overBudget.map(c=>c.name).join(', ') + '.');
   if(!d.overBudget.length && !d.nearLimit.length && d.savingsRate>=20) suggestions.push('Solid cycle — spending stayed within budget and savings rate is at/above the general benchmark.');
   if(suggestions.length===0) suggestions.push('Log a few more expenses for a more useful pattern report next cycle.');
-  suggestions.forEach(s=>lines.push('• ' + s));
-  return lines.join('\n');
+  suggestions.forEach(s=>L.push('- ' + s));
+  L.push('');
+
+  L.push('RECORD INTEGRITY');
+  L.push(thin);
+  if((d.editedCount||0) > 0){
+    L.push('* ' + d.editedCount + ' of ' + d.totalCount + ' entries above were modified after their original entry.');
+    L.push('Marked entries (*) reflect the most recently saved values as of the');
+    L.push('generation time above; prior versions are not retained in this statement.');
+  } else {
+    L.push('No entries in this statement have been modified since they were first recorded.');
+  }
+  L.push(thin);
+  L.push('This statement is generated from information entered by the account');
+  L.push('holder into Budget Cockpit for personal budgeting purposes. It is not');
+  L.push('an official record from any bank or financial institution.');
+  L.push(rule);
+  return L.join('\n');
 }
 
 const PIE_COLORS = ['#FFC24D','#00E5C7','#FF3B30','#FFB020','#7B8494','#B8790A','#0E8A76'];
@@ -3104,10 +3194,14 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
     // Header
     doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.setTextColor(20,25,40);
     doc.text('Budget Cockpit', marginX, y);
-    doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(120);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.text('Personal Financial Statement', pageW-marginX, y-3, {align:'right'});
+    doc.setFontSize(11); doc.setTextColor(120);
     doc.text(document.getElementById('reportTitle').textContent, marginX, y+7);
     doc.setFontSize(9);
     doc.text(currentPeriodLabel, marginX, y+13);
+    const pdfRef = 'BC-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+    doc.text('Ref: ' + pdfRef, pageW-marginX, y+13, {align:'right'});
     doc.setDrawColor(220); doc.line(marginX, y+18, pageW-marginX, y+18);
     y += 28;
 
@@ -3146,6 +3240,43 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
     labelValueRow('Savings / Emergency Fund contributed', fmt(d.savingsContrib) + '  (' + d.savingsRate + '%)', {color: [63,150,130]});
     labelValueRow('Remaining to spend', fmt(d.remaining));
     y += 4;
+
+    // Transaction detail — the itemized register a real statement shows,
+    // not just top categories. Capped at 40 rows to keep this from
+    // generating an unbounded number of pages for a very active cycle;
+    // the CSV export covers the full list if someone needs every row.
+    const items = (d.txs||[]).slice().sort((a,b)=> String(a.date||'').localeCompare(String(b.date||'')) || String(a.id).localeCompare(String(b.id)));
+    ensureSpace(20);
+    sectionTitle('Transaction detail (' + items.length + (items.length===1?' entry':' entries') + ')');
+    if(items.length===0){
+      bodyText('No transactions recorded this period.');
+    } else {
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(140);
+      doc.text('DATE', marginX, y);
+      doc.text('DESCRIPTION', marginX+22, y);
+      doc.text('CATEGORY', marginX+95, y);
+      doc.text('AMOUNT', pageW-marginX, y, {align:'right'});
+      y += 4.5;
+      doc.setDrawColor(230); doc.line(marginX, y-2.5, pageW-marginX, y-2.5);
+      items.slice(0,40).forEach(t=>{
+        ensureSpace(6);
+        const cat = catById(t.categoryId);
+        doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(90);
+        doc.text(String(t.date||'—'), marginX, y);
+        doc.text(String(t.desc||'(no description)').slice(0,32), marginX+22, y);
+        doc.text(String(cat?cat.name:'Uncategorized').slice(0,20), marginX+95, y);
+        doc.setTextColor(40);
+        doc.text(fmt(t.amount) + (t.updatedAt ? ' *' : ''), pageW-marginX, y, {align:'right'});
+        y += 5;
+      });
+      if(items.length > 40){
+        y += 1;
+        doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(140);
+        doc.text('+ ' + (items.length-40) + ' more entries — see the full list in the CSV export.', marginX, y);
+        y += 5;
+      }
+    }
+    y += 5;
 
     // Top categories
     ensureSpace(15 + Math.min(d.spentByCat.length,5)*7);
@@ -3206,9 +3337,25 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
     doc.addImage(document.getElementById('reportBarCanvas').toDataURL('image/png'), 'PNG', marginX + 92, y, 84, 63);
     y += 70;
 
+    // Record integrity
+    ensureSpace(20);
+    sectionTitle('Record integrity');
+    if((d.editedCount||0) > 0){
+      bodyText('* ' + d.editedCount + ' of ' + d.totalCount + ' entries above were modified after their original entry. Marked entries reflect the most recently saved values as of the generation time below; prior versions are not retained in this statement.');
+    } else {
+      bodyText('No entries in this statement have been modified since they were first recorded.');
+    }
+    y += 2;
+
     // Footer
     doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(160);
-    doc.text('Generated ' + new Date().toLocaleString('en-GB'), marginX, 289);
+    doc.text('Generated ' + new Date().toLocaleString('en-GB') + '  ·  Ref: ' + pdfRef, marginX, 282);
+    doc.setFontSize(7);
+    const disclaimerLines = doc.splitTextToSize(
+      'This statement is generated from information entered by the account holder into Budget Cockpit for personal budgeting purposes. It is not an official record from any bank or financial institution.',
+      pageW - marginX*2
+    );
+    doc.text(disclaimerLines, marginX, 286);
 
     doc.save(currentReportFilename + '.pdf');
     showToast('PDF downloaded');
@@ -3230,10 +3377,10 @@ function csvEscape(v){
 }
 document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
   if(!currentReportD || !currentReportD.txs){ showToast('No transaction data for this report'); return; }
-  const rows = [['Date','Category','Description','Amount','Method']];
+  const rows = [['Date','Category','Description','Amount','Method','Created','Last Edited']];
   [...currentReportD.txs].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
     const cat = catById(t.categoryId);
-    rows.push([t.date, cat ? cat.name : 'Uncategorized', t.desc || '', t.amount, t.method || '']);
+    rows.push([t.date, cat ? cat.name : 'Uncategorized', t.desc || '', t.amount, t.method || '', t.createdAt || '', t.updatedAt || '']);
   });
   const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -3553,10 +3700,13 @@ function isUnlockedAndUsable(){
   // Only idle-lock once someone's actually logged in and looking at the
   // app — never on the login screen itself, and never mid-way through
   // setting up a PIN (that would be a uniquely bad moment to lock them out).
+  // Optional chaining throughout: if any of these elements are ever missing
+  // (a partial deploy where index.html and app.js briefly don't match), this
+  // must fail safe and quiet — never throw and take the whole script down.
   return !!sessionToken
-    && document.getElementById('lockScreen').style.display !== 'flex'
-    && document.getElementById('pinLockScreen').style.display !== 'flex'
-    && document.getElementById('pinSetupOverlay').style.display !== 'flex';
+    && document.getElementById('lockScreen')?.style.display !== 'flex'
+    && document.getElementById('pinLockScreen')?.style.display !== 'flex'
+    && document.getElementById('pinSetupOverlay')?.style.display !== 'flex';
 }
 function checkIdleLock(){
   if(!isUnlockedAndUsable()) return;
@@ -3579,8 +3729,8 @@ function triggerIdleLock(){
   pinFailCount = 0;
   unlockBuffer = '';
   resetPinDots('pinUnlockDots');
-  document.getElementById('pinUnlockError').textContent = '';
-  document.getElementById('pinLockScreen').style.display = 'flex';
+  const errEl = document.getElementById('pinUnlockError'); if(errEl) errEl.textContent = '';
+  const screenEl = document.getElementById('pinLockScreen'); if(screenEl) screenEl.style.display = 'flex';
 }
 
 function resetPinDots(dotsId){ updatePinDots(dotsId, 0); }
@@ -3589,13 +3739,15 @@ function updatePinDots(dotsId, count){
 }
 function shakeDots(dotsId){
   const el = document.getElementById(dotsId);
+  if(!el) return;
   el.classList.remove('pin-shake'); void el.offsetWidth; el.classList.add('pin-shake');
 }
 function refreshPinStatusUI(){
   const has = hasPinSet();
-  document.getElementById('pinSetupBtn').textContent = has ? 'Change PIN' : 'Set up a PIN';
-  document.getElementById('pinRemoveBtn').style.display = has ? '' : 'none';
-  document.getElementById('pinStatusText').textContent = has
+  const setupBtn = document.getElementById('pinSetupBtn'); if(setupBtn) setupBtn.textContent = has ? 'Change PIN' : 'Set up a PIN';
+  const removeBtn = document.getElementById('pinRemoveBtn'); if(removeBtn) removeBtn.style.display = has ? '' : 'none';
+  const statusText = document.getElementById('pinStatusText');
+  if(statusText) statusText.textContent = has
     ? 'PIN lock is on — auto-locks after 5 min idle'
     : 'No PIN set — inactivity falls back to the full login';
 }
@@ -3605,18 +3757,27 @@ let setupBuffer = '';
 let setupFirstEntry = null;
 function openPinSetup(){
   setupBuffer = ''; setupFirstEntry = null;
-  document.getElementById('pinSetupTitle').textContent = 'Set a 6-digit PIN';
-  document.getElementById('pinSetupSub').textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
-  document.getElementById('pinSetupError').textContent = '';
+  const titleEl = document.getElementById('pinSetupTitle'); if(titleEl) titleEl.textContent = 'Set a 6-digit PIN';
+  const subEl = document.getElementById('pinSetupSub'); if(subEl) subEl.textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
+  const errEl = document.getElementById('pinSetupError'); if(errEl) errEl.textContent = '';
   resetPinDots('pinSetupDots');
-  document.getElementById('pinSetupOverlay').style.display = 'flex';
+  const overlay = document.getElementById('pinSetupOverlay'); if(overlay) overlay.style.display = 'flex';
 }
 function closePinSetup(){
-  document.getElementById('pinSetupOverlay').style.display = 'none';
+  const overlay = document.getElementById('pinSetupOverlay'); if(overlay) overlay.style.display = 'none';
   setupBuffer = ''; setupFirstEntry = null;
 }
-document.getElementById('pinSetupBtn').addEventListener('click', openPinSetup);
-document.getElementById('pinSetupKeypad').addEventListener('click', async (e)=>{
+// Every PIN control below is wired defensively: this whole feature must
+// never be able to take the rest of the app down just because one element
+// is missing (an out-of-sync deploy, a typo in an id, an older cached
+// index.html briefly serving alongside a newer app.js). An unguarded
+// document.getElementById('x').addEventListener(...) throws immediately if
+// 'x' doesn't exist — and since these run the moment the script loads, that
+// throw happens BEFORE boot() ever runs, which looks exactly like the app
+// being stuck on the loading screen forever. Guarding each one is what
+// stops one missing PIN element from being able to break login entirely.
+document.getElementById('pinSetupBtn')?.addEventListener('click', openPinSetup);
+document.getElementById('pinSetupKeypad')?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button'); if(!btn) return;
   const key = btn.dataset.key;
   if(key==='cancel'){ closePinSetup(); return; }
@@ -3628,8 +3789,8 @@ document.getElementById('pinSetupKeypad').addEventListener('click', async (e)=>{
 
   if(setupFirstEntry===null){
     setupFirstEntry = setupBuffer; setupBuffer = '';
-    document.getElementById('pinSetupTitle').textContent = 'Confirm your PIN';
-    document.getElementById('pinSetupSub').textContent = 'Enter the same 6 digits again.';
+    const titleEl = document.getElementById('pinSetupTitle'); if(titleEl) titleEl.textContent = 'Confirm your PIN';
+    const subEl = document.getElementById('pinSetupSub'); if(subEl) subEl.textContent = 'Enter the same 6 digits again.';
     setTimeout(()=>updatePinDots('pinSetupDots',0), 150);
     return;
   }
@@ -3640,17 +3801,17 @@ document.getElementById('pinSetupKeypad').addEventListener('click', async (e)=>{
     refreshPinStatusUI();
     showToast('PIN set — the app will auto-lock after 5 min idle');
   } else {
-    document.getElementById('pinSetupError').textContent = "Those didn't match — try again";
+    const errEl = document.getElementById('pinSetupError'); if(errEl) errEl.textContent = "Those didn't match — try again";
     shakeDots('pinSetupDots');
     setupFirstEntry = null; setupBuffer = '';
     setTimeout(()=>{
-      document.getElementById('pinSetupTitle').textContent = 'Set a 6-digit PIN';
-      document.getElementById('pinSetupSub').textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
+      const titleEl = document.getElementById('pinSetupTitle'); if(titleEl) titleEl.textContent = 'Set a 6-digit PIN';
+      const subEl = document.getElementById('pinSetupSub'); if(subEl) subEl.textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
       updatePinDots('pinSetupDots',0);
     }, 450);
   }
 });
-document.getElementById('pinRemoveBtn').addEventListener('click', async ()=>{
+document.getElementById('pinRemoveBtn')?.addEventListener('click', async ()=>{
   const ok = await askConfirm('Remove PIN?', "You'll go back to the full password log-in after inactivity instead of a quick PIN.");
   if(!ok) return;
   try{ localStorage.removeItem(PIN_HASH_KEY); }catch(e){}
@@ -3660,8 +3821,8 @@ document.getElementById('pinRemoveBtn').addEventListener('click', async ()=>{
 
 // ---- PIN unlock (the idle-lock screen itself) ----
 let unlockBuffer = '';
-document.getElementById('pinForgotBtn').addEventListener('click', ()=> lockNow());
-document.getElementById('pinUnlockKeypad').addEventListener('click', async (e)=>{
+document.getElementById('pinForgotBtn')?.addEventListener('click', ()=> lockNow());
+document.getElementById('pinUnlockKeypad')?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button'); if(!btn) return;
   const key = btn.dataset.key;
   if(key==='forgot') return; // its own listener above handles this
@@ -3678,19 +3839,20 @@ document.getElementById('pinUnlockKeypad').addEventListener('click', async (e)=>
 
   if(stored && enteredHash===stored){
     pinFailCount = 0;
-    document.getElementById('pinLockScreen').style.display = 'none';
+    const screenEl = document.getElementById('pinLockScreen'); if(screenEl) screenEl.style.display = 'none';
     noteActivity();
     return;
   }
   pinFailCount++;
   shakeDots('pinUnlockDots');
   setTimeout(()=>updatePinDots('pinUnlockDots',0), 150);
+  const errEl = document.getElementById('pinUnlockError');
   if(pinFailCount>=PIN_MAX_ATTEMPTS){
-    document.getElementById('pinUnlockError').textContent = 'Too many attempts — log in again';
+    if(errEl) errEl.textContent = 'Too many attempts — log in again';
     setTimeout(()=>lockNow(), 900);
   } else {
     const left = PIN_MAX_ATTEMPTS - pinFailCount;
-    document.getElementById('pinUnlockError').textContent = 'Incorrect PIN (' + left + ' attempt' + (left===1?'':'s') + ' left)';
+    if(errEl) errEl.textContent = 'Incorrect PIN (' + left + ' attempt' + (left===1?'':'s') + ' left)';
   }
 });
 
