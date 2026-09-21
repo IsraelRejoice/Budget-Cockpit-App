@@ -1,3 +1,4 @@
+
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -3499,6 +3500,8 @@ let lockMode = 'login'; // 'login' | 'signup'
 
 function showLockScreen(msg){
   hideLoadingScreen();
+  const resetReq = document.getElementById('pwResetRequestScreen'); if(resetReq) resetReq.style.display = 'none';
+  const resetComplete = document.getElementById('pwResetCompleteScreen'); if(resetComplete) resetComplete.style.display = 'none';
   document.getElementById('lockScreen').style.display = 'flex';
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
@@ -3534,6 +3537,131 @@ function setLockMode(mode){
 }
 document.getElementById('lockToggleModeBtn').addEventListener('click', ()=>{
   setLockMode(lockMode === 'login' ? 'signup' : 'login');
+});
+
+/* ============================================================
+   PASSWORD RESET — "Forgot password?" on the login screen, and the
+   completion screen someone lands on after clicking the link in their
+   reset email. redirect_to is built from window.location itself (never
+   hardcoded), so the emailed link always points at wherever this app is
+   actually hosted — but Supabase will still refuse to use it unless that
+   same URL is also added under Authentication → URL Configuration →
+   Redirect URLs in the Supabase dashboard; that allowlist is a server-side
+   setting this code can't change for you.
+   ============================================================ */
+function showAuthScreen(id){
+  ['lockScreen','pwResetRequestScreen','pwResetCompleteScreen'].forEach(sid=>{
+    const el = document.getElementById(sid); if(el) el.style.display = (sid===id ? 'flex' : 'none');
+  });
+}
+document.getElementById('lockForgotPwBtn')?.addEventListener('click', ()=>{
+  const emailField = document.getElementById('pwResetEmailInput');
+  if(emailField) emailField.value = document.getElementById('lockEmailInput').value.trim();
+  const errEl = document.getElementById('pwResetError'); if(errEl) errEl.textContent = '';
+  const okEl = document.getElementById('pwResetSuccess'); if(okEl) okEl.textContent = '';
+  showAuthScreen('pwResetRequestScreen');
+});
+document.getElementById('pwResetBackBtn')?.addEventListener('click', ()=> showAuthScreen('lockScreen'));
+
+document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
+  const email = document.getElementById('pwResetEmailInput').value.trim();
+  const errEl = document.getElementById('pwResetError');
+  const okEl = document.getElementById('pwResetSuccess');
+  const spinner = document.getElementById('pwResetSpinner');
+  const btn = document.getElementById('pwResetSendBtn');
+  errEl.textContent = ''; okEl.textContent = '';
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
+  if(btn.disabled) return;
+  btn.disabled = true; spinner.style.display = '';
+  try{
+    const redirectTo = window.location.origin + window.location.pathname;
+    const res = await fetchWithTimeout(AUTH_URL + '/recover?redirect_to=' + encodeURIComponent(redirectTo), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
+      body: JSON.stringify({ email })
+    }, 15000);
+    // Supabase intentionally returns success here whether or not the email
+    // is registered, so this can't be used to probe which emails have
+    // accounts — the message below reflects that on purpose, it isn't
+    // hiding a real error.
+    if(res.ok){
+      okEl.textContent = "If an account exists for that email, a reset link is on its way — check your inbox (and spam folder).";
+    } else {
+      const data = await res.json().catch(()=>({}));
+      errEl.textContent = (data && (data.error_description || data.msg)) || 'Could not send the reset email — try again shortly.';
+    }
+  }catch(e){
+    errEl.textContent = e.name === 'AbortError' ? 'Request timed out — try again' : 'Could not reach the backend — try again shortly.';
+  }finally{
+    btn.disabled = false; spinner.style.display = 'none';
+  }
+});
+
+// The link in the reset email redirects back here with the new session's
+// tokens in the URL fragment (never sent to any server, so this is the
+// only place they can be read from). Checked once at boot, before anything
+// else — if this fragment exists, the person just clicked a reset link and
+// needs the "set new password" screen, not the ordinary login screen.
+function parseAuthHash(){
+  const hash = window.location.hash || '';
+  if(!hash.includes('access_token')) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ''));
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+  const type = params.get('type');
+  const expires_in = Number(params.get('expires_in')) || 3600;
+  if(!access_token) return null;
+  return { access_token, refresh_token, type, expires_in };
+}
+let pendingRecovery = null;
+function checkForRecoveryLink(){
+  const parsed = parseAuthHash();
+  // Clear the fragment immediately regardless of outcome — it holds live
+  // credentials and must not linger in the address bar, browser history,
+  // or survive a page refresh to be reused a second time.
+  if(parsed) history.replaceState(null, '', window.location.pathname + window.location.search);
+  if(parsed && parsed.type === 'recovery'){
+    pendingRecovery = parsed;
+    return true;
+  }
+  return false;
+}
+
+document.getElementById('pwResetCompleteBtn')?.addEventListener('click', async ()=>{
+  const pw = document.getElementById('pwNewInput').value;
+  const confirm = document.getElementById('pwNewConfirmInput').value;
+  const errEl = document.getElementById('pwResetCompleteError');
+  const spinner = document.getElementById('pwResetCompleteSpinner');
+  const btn = document.getElementById('pwResetCompleteBtn');
+  errEl.textContent = '';
+  if(pw.length < 6){ errEl.textContent = 'Password must be at least 6 characters'; return; }
+  if(pw !== confirm){ errEl.textContent = "Those didn't match — try again"; return; }
+  if(!pendingRecovery){ errEl.textContent = 'This reset link has expired — request a new one'; return; }
+  if(btn.disabled) return;
+  btn.disabled = true; spinner.style.display = '';
+  try{
+    const res = await fetchWithTimeout(AUTH_URL + '/user', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + pendingRecovery.access_token},
+      body: JSON.stringify({ password: pw })
+    }, 15000);
+    if(res.ok){
+      storeSession({ access_token: pendingRecovery.access_token, refresh_token: pendingRecovery.refresh_token, expires_in: pendingRecovery.expires_in });
+      pendingRecovery = null;
+      noteActivity();
+      showToast('Password updated — you\'re logged in');
+      showAuthScreen('lockScreen');
+      hideLockScreen();
+      loadState();
+    } else {
+      const data = await res.json().catch(()=>({}));
+      errEl.textContent = (data && (data.error_description || data.msg)) || 'Could not update the password — the link may have expired.';
+    }
+  }catch(e){
+    errEl.textContent = e.name === 'AbortError' ? 'Request timed out — try again' : 'Could not reach the backend — try again shortly.';
+  }finally{
+    btn.disabled = false; spinner.style.display = 'none';
+  }
 });
 
 async function doLogin(){
@@ -3902,6 +4030,11 @@ document.getElementById('lockNowBtn').addEventListener('click', ()=>{
    INIT
    ============================================================ */
 async function boot(){
+  if(checkForRecoveryLink()){
+    hideLoadingScreen();
+    showAuthScreen('pwResetCompleteScreen');
+    return;
+  }
   if(!API_URL){ loadState(); return; } // no backend configured — nothing to lock
   const mirror = loadLocalMirror();
 
