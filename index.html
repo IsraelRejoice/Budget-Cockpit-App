@@ -656,11 +656,40 @@ body{min-height:100vh; padding-bottom:92px;}
     <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
     <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
+    <button class="btn btn-ghost" id="lockForgotPwBtn" type="button" style="margin-top:2px;font-size:12px;">Forgot password?</button>
     <div class="lock-spinner" id="lockSpinner" style="display:none;"></div>
     <div class="lock-checking-text" id="lockCheckingText" style="display:none;">Checking your details…</div>
     <div class="lock-error" id="lockError"></div>
   </div>
 </div>
+
+<div class="lock-screen" id="pwResetRequestScreen" style="display:none;">
+  <div class="lock-box">
+    <div class="lock-icon">✉️</div>
+    <div class="lock-title">Reset your password</div>
+    <p class="lock-sub">Enter the email on your account and we'll send a reset link.</p>
+    <input type="email" id="pwResetEmailInput" class="lock-input" placeholder="Email" autocomplete="username">
+    <button class="btn btn-primary" id="pwResetSendBtn" style="margin-top:10px;">Send reset link</button>
+    <button class="btn btn-ghost" id="pwResetBackBtn" type="button" style="margin-top:8px;">Back to log in</button>
+    <div class="lock-spinner" id="pwResetSpinner" style="display:none;"></div>
+    <div class="lock-error" id="pwResetError"></div>
+    <div class="lock-error" id="pwResetSuccess" style="color:var(--teal);"></div>
+  </div>
+</div>
+
+<div class="lock-screen" id="pwResetCompleteScreen" style="display:none;">
+  <div class="lock-box">
+    <div class="lock-icon">🔑</div>
+    <div class="lock-title">Set a new password</div>
+    <p class="lock-sub">You followed a reset link — choose a new password below.</p>
+    <input type="password" id="pwNewInput" class="lock-input" placeholder="New password (at least 6 characters)" autocomplete="new-password" style="margin-bottom:8px;">
+    <input type="password" id="pwNewConfirmInput" class="lock-input" placeholder="Confirm new password" autocomplete="new-password">
+    <button class="btn btn-primary" id="pwResetCompleteBtn" style="margin-top:10px;">Set new password &amp; log in</button>
+    <div class="lock-spinner" id="pwResetCompleteSpinner" style="display:none;"></div>
+    <div class="lock-error" id="pwResetCompleteError"></div>
+  </div>
+</div>
+
 
 <div class="loading-screen" id="loadingScreen">
   <div class="loading-spinner"></div>
