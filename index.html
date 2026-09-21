@@ -18,7 +18,7 @@
   connect-src 'self' https://*.supabase.co https://api.quotable.io https://api.frankfurter.dev;
   object-src 'none';
   base-uri 'self';
-  frame-ancestors 'none';
+  frame-ancestors 'self';
 ">
 <!-- CSP note: script-src no longer needs 'unsafe-inline' now that all JS
      lives in app.js (an external file) rather than inline — this is a real
@@ -981,7 +981,7 @@ body{min-height:100vh; padding-bottom:92px;}
       <div class="faq-item"><div class="faq-q">Light or dark mode — does it matter which I use?</div>
         <div class="faq-a">Purely a preference, toggled from the header icon or Settings. Nothing about calculations, storage, or backend behavior changes between them.</div></div>
       <div class="faq-item"><div class="faq-q">I got a "could not save" or "unable to reach backend" message — what do I do?</div>
-        <div class="faq-a">First check you have a working internet connection. If it persists, open YOUR_FUNCTION_URL?action=version in a browser — it should return JSON. If it doesn't, the Edge Function isn't deployed or was deployed with JWT verification left on. Also confirm SUPABASE_URL and SUPABASE_ANON_KEY in app.js match Project Settings → API exactly.</div></div>
+        <div class="faq-a">First check you have a working internet connection. If it persists, open YOUR_FUNCTION_URL?action=version in a browser — it should return JSON. If it doesn't, the Edge Function isn't deployed or was deployed with JWT verification left on. Also confirm SUPABASE_URL and SUPABASE_ANON_KEY in config.js match Project Settings → API exactly — a browser console error mentioning a domain like "your-project-ref.supabase.co" (rather than your real project's address) means config.js still has a placeholder value in it.</div></div>
     </div>
 
     <div class="guide-block">
@@ -1441,6 +1441,7 @@ body{min-height:100vh; padding-bottom:92px;}
 
 <div class="toast" id="toast"><span id="toastMsg"></span><button class="toast-undo-btn" id="toastUndoBtn" style="display:none;">Undo</button></div>
 
+<script src="config.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>
