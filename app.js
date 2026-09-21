@@ -128,15 +128,12 @@ function currencyCodeFor(sym){
    BACKEND CONFIG
    ============================================================ */
 /* ------------------------------------------------------------------
-   SUPABASE — fill these two in once (Supabase dashboard → Project
-   Settings → API). Both are safe to have in this public file: the URL
-   is public by design, and the anon key is a publishable key that can
-   do nothing on its own. Row Level Security enforces that every
-   person can only ever see their own rows; every request also goes
-   through the Edge Function, which checks the login on top of that.
+   SUPABASE — SUPABASE_URL and SUPABASE_ANON_KEY are defined in
+   config.js, loaded via a <script> tag in index.html BEFORE this
+   file. They are deliberately NOT declared here: keeping them in a
+   separate, never-regenerated file means every future app.js update
+   leaves your real credentials untouched.
    ------------------------------------------------------------------ */
-const SUPABASE_URL      = 'https://YOUR-PROJECT-REF.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR-ANON-PUBLIC-KEY';
 
 // Everything else in the app talks to this one endpoint, exactly as it
 // used to talk to the Apps Script exec URL. Same action names, same
