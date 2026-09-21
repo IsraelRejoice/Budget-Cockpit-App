@@ -1,4 +1,3 @@
-
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -3614,9 +3613,24 @@ async function doLogin(){
       }
     }
   }catch(e){
-    errEl.textContent = e.name === 'AbortError'
-      ? 'Request timed out — check your connection and try again'
-      : 'Could not reach backend — check your connection';
+    if(e.name === 'AbortError'){
+      errEl.textContent = 'Request timed out — check your connection and try again';
+    } else if(navigator.onLine === false){
+      errEl.textContent = 'You appear to be offline — check your connection and try again';
+    } else {
+      // The device has a working connection (navigator.onLine is true) but
+      // the fetch itself still failed outright — not a proper error
+      // response, an actual failure to connect. The two most common real
+      // causes, in order: a free-tier Supabase project that auto-paused
+      // itself after a period of inactivity (the fix is a couple of taps in
+      // the Supabase dashboard, not anything in this app), or a browser
+      // privacy/ad-block extension blocking the request outright. Naming
+      // both directly beats a generic "check your connection" that sends
+      // someone checking their Wi-Fi for a problem that was never there.
+      errEl.innerHTML = "Can't reach the backend. If your internet is fine, the most likely cause is the Supabase project is paused (free-tier projects pause after inactivity — resume it from the Supabase dashboard) or a browser extension is blocking the request. <a href=\"#\" id=\"lockRetryLink\" style=\"color:var(--gold);\">Try again</a>";
+      const retryLink = document.getElementById('lockRetryLink');
+      if(retryLink) retryLink.addEventListener('click', (ev)=>{ ev.preventDefault(); doLogin(); });
+    }
   }finally{
     spinner.style.display = 'none';
     checkingText.style.display = 'none';
