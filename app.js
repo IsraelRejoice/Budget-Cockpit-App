@@ -1,4 +1,3 @@
-
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -140,6 +139,11 @@ function currencyCodeFor(sym){
 // JSON shapes — only the transport and the auth header changed.
 const API_URL   = SUPABASE_URL + '/functions/v1/api';
 const AUTH_URL  = SUPABASE_URL + '/auth/v1';
+// Bump this on every shipped update — shown in Settings so you (and anyone
+// helping you debug) can tell at a glance whether someone's device has
+// actually picked up the latest version, without digging through file dates.
+const APP_VERSION = '1.6.0';
+
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
 const REFRESH_KEY = 'budget-cockpit-refresh';
@@ -2034,6 +2038,8 @@ function attachCatDrag(handle, div){
 
 function renderSettings(){
   refreshPinStatusUI();
+  const versionEl = document.getElementById('appVersionText');
+  if(versionEl) versionEl.textContent = APP_VERSION;
   const curSel = document.getElementById('currencySelect');
   if(!curSel.options.length){
     curSel.innerHTML = CURRENCY_OPTIONS.map(c=>`<option value="${c.sym}">${escapeHtml(c.label)}</option>`).join('');
@@ -3524,12 +3530,23 @@ function setLockMode(mode){
     toggleBtn.textContent = 'Already have an account? Log in';
     pwInput.setAttribute('autocomplete', 'new-password');
     pwInput.setAttribute('placeholder', 'Password (at least 6 characters)');
+    let note = document.getElementById('signupPrivacyNote');
+    if(!note){
+      note = document.createElement('p');
+      note.id = 'signupPrivacyNote';
+      note.style.cssText = 'font-size:10.5px;color:var(--muted);line-height:1.5;margin:10px 0 0;';
+      note.textContent = 'Your budget is private to your account — nobody else who signs up can see it. Full details in Settings → Privacy once you\'re in.';
+      sub.insertAdjacentElement('afterend', note);
+    }
+    note.style.display = '';
   } else {
     sub.textContent = 'Log in to your budget';
     submitBtn.textContent = 'Log in';
     toggleBtn.textContent = "New here? Create an account";
     pwInput.setAttribute('autocomplete', 'current-password');
     pwInput.setAttribute('placeholder', 'Password');
+    const note = document.getElementById('signupPrivacyNote');
+    if(note) note.style.display = 'none';
   }
 }
 document.getElementById('lockToggleModeBtn').addEventListener('click', ()=>{
