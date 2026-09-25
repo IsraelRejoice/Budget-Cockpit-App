@@ -1802,6 +1802,12 @@ function setFinanceTab(which){
     document.getElementById(tabs[k]).classList.toggle('active', k===which);
     document.getElementById(panels[k]).style.display = k===which ? '' : 'none';
   });
+  // Without this, switching sub-tabs while scrolled down leaves the page at
+  // whatever scroll position you were at on the PREVIOUS tab — since the
+  // new tab's content is shorter/taller, that can land you partway down or
+  // even at the bottom of the tab you just switched to, looking like it
+  // "opened at the bottom" instead of the top.
+  window.scrollTo({top: 0, behavior: 'instant'});
 }
 document.getElementById('financeTabDebt').addEventListener('click', ()=>setFinanceTab('debt'));
 document.getElementById('financeTabSavings').addEventListener('click', ()=>setFinanceTab('savings'));
@@ -2233,6 +2239,7 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
     if(btn.dataset.view === 'settings') renderSharesList();
+    window.scrollTo({top: 0, behavior: 'instant'});
   });
 });
 
