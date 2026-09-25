@@ -10,7 +10,7 @@
 // it unchanged after a deploy is the classic cause of "I shipped the fix but
 // the app still behaves like the old version" — which is exactly the
 // symptom pattern seen repeatedly on this project.
-const CACHE_NAME = 'budget-cockpit-v14';
+const CACHE_NAME = 'budget-cockpit-v15';
 const APP_SHELL = [
   './',
   './index.html',
