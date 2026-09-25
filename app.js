@@ -142,7 +142,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -3924,10 +3924,23 @@ function openPinSetup(){
   const subEl = document.getElementById('pinSetupSub'); if(subEl) subEl.textContent = "Choose a PIN you'll remember — this isn't sent anywhere, it only unlocks this device.";
   const errEl = document.getElementById('pinSetupError'); if(errEl) errEl.textContent = '';
   resetPinDots('pinSetupDots');
-  const overlay = document.getElementById('pinSetupOverlay'); if(overlay) overlay.style.display = 'flex';
+  const wrap = document.getElementById('pinSetupOverlay'); if(wrap) wrap.style.display = 'flex';
+  // pinSetupSheet is a .sheet, same as every other sheet in the app (addSheet,
+  // extraSheet, etc.) — it's transform:translateY(100%) (pushed off-screen)
+  // until the '.show' class is added. The old code only set display:flex on
+  // the wrapper and never added that class, so the sheet stayed invisible
+  // below the viewport even though the click handler fired correctly with
+  // no error. Reusing openSheetEl() here is what every other sheet already
+  // relies on — see the SHEETS section above.
+  const sheetEl = document.getElementById('pinSetupSheet');
+  if(sheetEl) openSheetEl(sheetEl);
+  activeSheet = sheetEl;
 }
 function closePinSetup(){
-  const overlay = document.getElementById('pinSetupOverlay'); if(overlay) overlay.style.display = 'none';
+  const wrap = document.getElementById('pinSetupOverlay'); if(wrap) wrap.style.display = 'none';
+  const sheetEl = document.getElementById('pinSetupSheet');
+  if(sheetEl) closeSheetEl(sheetEl);
+  if(activeSheet === sheetEl) activeSheet = null;
   setupBuffer = ''; setupFirstEntry = null;
 }
 // Every PIN control below is wired defensively: this whole feature must
