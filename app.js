@@ -1,3 +1,4 @@
+
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -107,6 +108,7 @@ let state = {
   debtFocusId: '',         // used when debtStrategy === 'manual'
   loans: [],               // {id, borrower, reason, amount} — money YOU lent out
   loanPaidAccumulated: {}, // {loanId: lifetime repaid total, excluding current uncommitted cycle}
+  loanRepayLog: [],        // [{id, loanId, amount, principal, date, at, method, extraId}] — itemised repayments received
   aiHistory: [],           // {id, role:'user'|'bot', text, error?}
   personalNotes: '',       // free-text budgeting notes/strategy from the Guide tab
   bills: [],               // {id, name, amount, dueDay} — recurring monthly bills/subscriptions
@@ -142,7 +144,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.7.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -181,6 +183,7 @@ try{
 }catch(e){ /* private browsing may block storage */ }
 
 function storeSession(data){
+  clearParkedSession();
   sessionToken = (data && data.access_token) || '';
   refreshToken = (data && data.refresh_token) || refreshToken;
   // expires_in is seconds. Subtract a minute so we refresh slightly early
@@ -345,6 +348,7 @@ async function apiPost(action, payload){
 }
 function onSessionInvalid(){
   clearSession();
+  clearParkedSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
   // Same reasoning as lockNow() — an expired/invalidated session shouldn't
   // leave the previous session's full financial data sitting in the DOM or
@@ -390,6 +394,7 @@ async function loadState(){
   if(state.debtFocusId == null) state.debtFocusId = '';
   if(!state.loans) state.loans = [];
   if(!state.loanPaidAccumulated) state.loanPaidAccumulated = {};
+  if(!Array.isArray(state.loanRepayLog)) state.loanRepayLog = [];
   // Existing accounts already have a saved categories list from the server,
   // which predates this category — add it once so it shows up for
   // returning users too, not just brand-new accounts.
@@ -1642,6 +1647,9 @@ function renderDebtTab(){
         </div>
       `;
       listWrap.appendChild(div);
+      div.classList.add('clickable');
+      div.insertAdjacentHTML('beforeend', '<div class="debt-hist-hint">Tap for payment history</div>');
+      div.addEventListener('click', (e)=>{ if(e.target.closest('button')) return; openPayHistory('debt', debt.id); });
     });
     listWrap.querySelectorAll('[data-pay]').forEach(b=>b.addEventListener('click', ()=>openDebtPaySheet(b.dataset.pay)));
     listWrap.querySelectorAll('[data-adjustdebt]').forEach(b=>b.addEventListener('click', ()=>{
@@ -1711,6 +1719,9 @@ function renderLoanTab(){
       </div>
     `;
     listWrap.appendChild(div);
+    div.classList.add('clickable');
+    div.insertAdjacentHTML('beforeend', '<div class="debt-hist-hint">Tap for repayment history</div>');
+    div.addEventListener('click', (e)=>{ if(e.target.closest('button')) return; openPayHistory('loan', loan.id); });
   });
   listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
   listWrap.querySelectorAll('[data-adjustloan]').forEach(b=>b.addEventListener('click', ()=>{
@@ -1780,9 +1791,16 @@ document.getElementById('loanRepaySaveBtn').addEventListener('click', ()=>{
   if(principalPortion > 0){
     state.loanPaidAccumulated[repayingLoanId] = (state.loanPaidAccumulated[repayingLoanId]||0) + principalPortion;
   }
+  const repayExtraId = excessPortion > 0 ? uniqueId() : '';
+  if(!Array.isArray(state.loanRepayLog)) state.loanRepayLog = [];
+  state.loanRepayLog.push({
+    id: uniqueId('lrp'), loanId: repayingLoanId, amount, principal: principalPortion,
+    date, at: new Date().toISOString(), method, extraId: repayExtraId
+  });
+  if(state.loanRepayLog.length > 500) state.loanRepayLog = state.loanRepayLog.slice(-500);
   if(excessPortion > 0){
     state.extraIncome.push({
-      id: uniqueId(), amount: excessPortion, date, method,
+      id: repayExtraId, amount: excessPortion, date, method,
       source: (loan ? loan.borrower : 'Loan') + ' — repayment (above what was lent)',
       loanId: repayingLoanId
     });
@@ -1863,6 +1881,92 @@ document.getElementById('debtPaySaveBtn').addEventListener('click', ()=>{
   closeSheetEl(debtPaySheet); activeSheet=null; payingDebtId=null;
   showToast('Payment logged');
 });
+
+
+/* ============================================================
+   PAYMENT / REPAYMENT HISTORY (tap a debt or loan card)
+   ============================================================ */
+const payHistSheet = document.getElementById('payHistSheet');
+const HIST_DATE_OPTS = {day:'numeric', month:'short', year:'numeric'};
+function histDateLabel(dateStr){
+  const d = dateStr ? new Date(dateStr + 'T00:00:00') : null;
+  return d && !isNaN(d) ? d.toLocaleDateString(undefined, HIST_DATE_OPTS) : '';
+}
+function histTimeLabel(iso){
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'}) : '';
+}
+// {date, at} -> {when, logged}: "12 Sep 2026 · 3:42 PM" when the payment date
+// and the moment it was logged fall on the same day, otherwise the payment
+// date plus a separate "Logged ..." line.
+function histWhen(dateStr, iso){
+  const dLabel = histDateLabel(dateStr);
+  const tLabel = histTimeLabel(iso);
+  if(!iso || !tLabel) return {when: dLabel || 'Date not recorded', logged: ''};
+  const atDay = toDateInput(new Date(iso));
+  if(!dLabel || atDay === dateStr) return {when: (dLabel || histDateLabel(atDay)) + ' · ' + tLabel, logged: ''};
+  return {when: dLabel, logged: 'Logged ' + histDateLabel(atDay) + ', ' + tLabel};
+}
+function debtPaymentRecords(debtId){
+  const recs = [];
+  const add = (t, cycle)=> recs.push({amount: Number(t.amount)||0, date: t.date||'', at: t.createdAt||'', method: t.method||'', cycle});
+  (state.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, 'This cycle'); });
+  (state.history||[]).forEach(h=>(h.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, h.label); }));
+  return recs;
+}
+function loanRepaymentRecords(loanId){
+  const log = (state.loanRepayLog||[]).filter(r=>r.loanId === loanId);
+  const loggedExtra = new Set(log.map(r=>r.extraId).filter(Boolean));
+  const recs = log.map(r=>({amount: Number(r.amount)||0, date: r.date||'', at: r.at||'', method: r.method||'', principal: Number(r.principal)||0}));
+  // Older repayments logged before itemised tracking existed: only the part
+  // above the amount lent was ever recorded (as extra income).
+  const legacy = [];
+  (state.extraIncome||[]).forEach(e=>{ if(e.loanId === loanId && !loggedExtra.has(e.id)) legacy.push(e); });
+  (state.history||[]).forEach(h=>(h.extraIncome||[]).forEach(e=>{ if(e.loanId === loanId && !loggedExtra.has(e.id)) legacy.push(e); }));
+  legacy.forEach(e=>recs.push({amount: Number(e.amount)||0, date: e.date||'', at: '', method: e.method||'', legacy: true}));
+  return recs;
+}
+function sortHistRecords(recs){
+  const key = r => (r.date || (r.at||'').slice(0,10) || '') ;
+  return recs.slice().sort((a,b)=> key(b).localeCompare(key(a)) || (b.at||'').localeCompare(a.at||''));
+}
+function openPayHistory(kind, id){
+  const isDebt = kind === 'debt';
+  const item = isDebt ? debtById(id) : loanById(id);
+  if(!item) return;
+  const name = isDebt ? item.creditor : item.borrower;
+  const recs = sortHistRecords(isDebt ? debtPaymentRecords(id) : loanRepaymentRecords(id));
+  const paidTotal = isDebt ? paidForDebt(id) : paidForLoan(id);
+  const itemised = isDebt ? recs.reduce((s,r)=>s+r.amount,0)
+                          : recs.filter(r=>!r.legacy).reduce((s,r)=>s+(r.principal||0),0);
+  const untracked = Math.round((paidTotal - itemised) * 100) / 100;
+  document.getElementById('payHistTitle').textContent = (isDebt ? 'Payments — ' : 'Repayments — ') + name;
+  document.getElementById('payHistSummary').textContent =
+    (isDebt ? 'Paid ' : 'Repaid ') + fmt(paidTotal) + ' of ' + fmt(item.amount) + (isDebt ? ' owed' : ' lent') +
+    ' · ' + recs.length + (recs.length === 1 ? ' entry' : ' entries');
+  const list = document.getElementById('payHistList');
+  if(!recs.length && untracked <= 0.5){
+    list.innerHTML = '<div class="empty-hist" style="margin:0;">No ' + (isDebt ? 'payments' : 'repayments') + ' logged yet.</div>';
+  } else {
+    let html = recs.map(r=>{
+      const w = histWhen(r.date, r.at);
+      const meta = [];
+      if(w.logged) meta.push(w.logged);
+      if(r.method) meta.push(escapeHtml(r.method));
+      if(isDebt && r.cycle && r.cycle !== 'This cycle') meta.push('Cycle ' + escapeHtml(r.cycle));
+      if(r.legacy) meta.push('portion above the amount lent');
+      return '<div class="pay-hist-row"><div><div>' + escapeHtml(w.when) + '</div>' +
+        (meta.length ? '<div class="ph-meta">' + meta.join(' · ') + '</div>' : '') +
+        '</div><div class="ph-amt">' + fmt(r.amount) + '</div></div>';
+    }).join('');
+    if(untracked > 0.5){
+      html += '<div class="pay-hist-row"><div><div>Earlier / adjusted amounts</div><div class="ph-meta">Not itemised — added through the ✎ adjust button or archived before detailed tracking</div></div><div class="ph-amt">' + fmt(untracked) + '</div></div>';
+    }
+    list.innerHTML = html;
+  }
+  activeSheet = payHistSheet; openSheetEl(payHistSheet);
+}
+document.getElementById('payHistCloseBtn').addEventListener('click', ()=>{ closeSheetEl(payHistSheet); activeSheet = null; });
 
 /* ============================================================
    RENDER: HISTORY
@@ -3515,7 +3619,7 @@ function showLockScreen(msg){
   document.getElementById('lockScreen').style.display = 'flex';
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
-  setTimeout(()=>document.getElementById('lockEmailInput').focus(), 50);
+  setupLockMethods();
 }
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
@@ -3888,7 +3992,7 @@ document.addEventListener('visibilitychange', ()=>{
 
 let pinFailCount = 0;
 function triggerIdleLock(){
-  if(!hasPinSet()){ lockNow(); return; } // no PIN configured — fall back to the full, stronger lock
+  if(!hasPinSet()){ if(hasBioSet()) softLockNow(); else lockNow(); return; } // no PIN: biometrics-only soft-locks, otherwise the full logout
   pinFailCount = 0;
   unlockBuffer = '';
   resetPinDots('pinUnlockDots');
@@ -3912,7 +4016,8 @@ function refreshPinStatusUI(){
   const statusText = document.getElementById('pinStatusText');
   if(statusText) statusText.textContent = has
     ? 'PIN lock is on — auto-locks after 5 min idle'
-    : 'No PIN set — inactivity falls back to the full login';
+    : 'No PIN set';
+  refreshBioStatusUI();
 }
 
 // ---- PIN setup (Settings → Security) ----
@@ -4047,6 +4152,7 @@ function lockNow(){
     }catch(e){}
   }
   clearSession();
+  clearParkedSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
   // A reload (not just showLockScreen()) is deliberate: the lock screen is
   // a CSS overlay, not a teardown — the fully-rendered DOM underneath (every
@@ -4057,8 +4163,220 @@ function lockNow(){
 }
 document.getElementById('lockNowBtn').addEventListener('click', ()=>{
   if(!API_URL){ showToast('No backend connected — nothing to lock'); return; }
+  if(quickSignInEnabled()) softLockNow(); else lockNow();
+});
+document.getElementById('signOutFullBtn')?.addEventListener('click', ()=>{
+  if(!API_URL){ showToast('No backend connected — nothing to sign out of'); return; }
   lockNow();
 });
+
+
+/* ============================================================
+   QUICK SIGN-IN — choose how to get back in: password, PIN or biometrics.
+   "Lock app now" (when a PIN or biometrics is set) parks the login on this
+   device and reloads to wipe the screen; the PIN or biometric check then
+   restores it. "Sign out completely" (lockNow) still revokes the login on
+   the server and discards the parked copy. Both are device-local
+   convenience gates: they don't prove anything to the server, and the
+   password always still works.
+   ============================================================ */
+const PARKED_KEY   = 'budget-cockpit-parked-session';
+const BIO_KEY      = 'budget-cockpit-bio-cred';
+const PIN_FAILS_KEY = 'budget-cockpit-pin-fails';
+
+function b64uEnc(buf){
+  let s = ''; new Uint8Array(buf).forEach(b=>{ s += String.fromCharCode(b); });
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64uDec(str){
+  str = str.replace(/-/g,'+').replace(/_/g,'/'); while(str.length % 4) str += '=';
+  const bin = atob(str); const out = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function hasParkedSession(){ try{ return !!localStorage.getItem(PARKED_KEY); }catch(e){ return false; } }
+function clearParkedSession(){
+  try{ localStorage.removeItem(PARKED_KEY); localStorage.removeItem(PIN_FAILS_KEY); }catch(e){}
+}
+function bioSupported(){ return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create); }
+function hasBioSet(){ try{ return !!localStorage.getItem(BIO_KEY) && bioSupported(); }catch(e){ return false; } }
+function quickSignInEnabled(){ return hasPinSet() || hasBioSet(); }
+
+function softLockNow(){
+  if(!sessionToken && !refreshToken){ lockNow(); return; }
+  try{
+    localStorage.setItem(PARKED_KEY, JSON.stringify({ access: sessionToken, refresh: refreshToken, exp: sessionExpiresAt }));
+  }catch(e){ lockNow(); return; }
+  clearSession();
+  location.reload(); // same reason as lockNow(): a reload is what actually clears the rendered data from the page
+}
+
+async function restoreParkedSession(){
+  let p = null;
+  try{ p = JSON.parse(localStorage.getItem(PARKED_KEY) || 'null'); }catch(e){}
+  if(!p || !p.refresh){ clearParkedSession(); return false; }
+  storeSession({ access_token: p.access, refresh_token: p.refresh, expires_in: Math.max(Math.floor(((p.exp||0) - Date.now())/1000), 1) });
+  hideLockScreen();
+  noteActivity();
+  await boot();
+  return true;
+}
+function discardParkedSession(){
+  // Too many wrong PINs: best-effort server revoke, then drop the saved login.
+  let p = null; try{ p = JSON.parse(localStorage.getItem(PARKED_KEY) || 'null'); }catch(e){}
+  if(p && p.access){
+    try{ fetch(AUTH_URL + '/logout', { method:'POST', headers:{'apikey': SUPABASE_ANON_KEY, 'Authorization':'Bearer ' + p.access}, keepalive:true }).catch(()=>{}); }catch(e){}
+  }
+  clearParkedSession();
+  try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+}
+
+let lockMethod = 'password';
+function setLockMethod(m){
+  lockMethod = m;
+  const show = (id, on)=>{ const el = document.getElementById(id); if(el) el.style.display = on ? '' : 'none'; };
+  show('lockPasswordPanel', m === 'password');
+  show('lockPinPanel', m === 'pin');
+  show('lockBioPanel', m === 'bio');
+  document.querySelectorAll('#lockMethodTabs .lock-tab').forEach(b=>b.classList.toggle('active', b.dataset.method === m));
+  const sub = document.getElementById('lockSub');
+  if(sub && lockMode === 'login') sub.textContent = m === 'pin' ? 'Enter your PIN' : m === 'bio' ? 'Use your fingerprint or face' : 'Log in to your budget';
+  document.getElementById('lockError').textContent = '';
+  setTimeout(()=>{
+    const f = document.getElementById(m === 'pin' ? 'lockPinInput' : m === 'password' ? 'lockEmailInput' : null);
+    if(f) f.focus();
+  }, 50);
+}
+function setupLockMethods(){
+  const tabs = document.getElementById('lockMethodTabs');
+  const pin = hasPinSet(), bio = hasBioSet();
+  if(!tabs) return;
+  if(!hasParkedSession() || !(pin || bio)){
+    tabs.style.display = 'none';
+    setLockMethod('password');
+    return;
+  }
+  tabs.style.display = 'flex';
+  const tp = document.getElementById('lockTabPin'); if(tp) tp.style.display = pin ? '' : 'none';
+  const tb = document.getElementById('lockTabBio'); if(tb) tb.style.display = bio ? '' : 'none';
+  setLockMethod(pin ? 'pin' : 'bio');
+}
+document.querySelectorAll('#lockMethodTabs .lock-tab').forEach(b=>b.addEventListener('click', ()=>setLockMethod(b.dataset.method)));
+
+async function unlockWithPin(){
+  const input = document.getElementById('lockPinInput');
+  const errEl = document.getElementById('lockError');
+  const pin = input ? input.value : '';
+  if(!/^\d{6}$/.test(pin)){ errEl.textContent = 'Enter your 6-digit PIN'; return; }
+  let stored = ''; try{ stored = localStorage.getItem(PIN_HASH_KEY) || ''; }catch(e){}
+  const entered = await hashPin(pin);
+  if(input) input.value = '';
+  if(stored && entered === stored){
+    try{ localStorage.removeItem(PIN_FAILS_KEY); }catch(e){}
+    await restoreParkedSession();
+    return;
+  }
+  let fails = 0; try{ fails = Number(localStorage.getItem(PIN_FAILS_KEY) || 0) + 1; localStorage.setItem(PIN_FAILS_KEY, String(fails)); }catch(e){ fails = 1; }
+  if(fails >= PIN_MAX_ATTEMPTS){
+    discardParkedSession();
+    setupLockMethods();
+    errEl.textContent = 'Too many wrong PINs — please log in with your password.';
+  } else {
+    const left = PIN_MAX_ATTEMPTS - fails;
+    errEl.textContent = 'Incorrect PIN (' + left + ' attempt' + (left === 1 ? '' : 's') + ' left)';
+  }
+}
+document.getElementById('lockPinBtn')?.addEventListener('click', unlockWithPin);
+document.getElementById('lockPinInput')?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') unlockWithPin(); });
+
+async function verifyBiometrics(){
+  let id = ''; try{ id = localStorage.getItem(BIO_KEY) || ''; }catch(e){}
+  if(!id || !bioSupported()) return false;
+  try{
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type:'public-key', id: b64uDec(id), transports:['internal'] }],
+      userVerification: 'required', timeout: 60000
+    }});
+    return !!cred;
+  }catch(e){ return false; }
+}
+document.getElementById('lockBioBtn')?.addEventListener('click', async ()=>{
+  const errEl = document.getElementById('lockError');
+  errEl.textContent = '';
+  if(await verifyBiometrics()){ await restoreParkedSession(); }
+  else errEl.textContent = 'Biometric check failed or was cancelled — try again, or use your PIN or password.';
+});
+
+async function enrollBiometrics(){
+  if(!bioSupported()){ showToast('This browser does not support biometric sign-in'); return; }
+  let ok = false;
+  try{ ok = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }catch(e){}
+  if(!ok){ showToast('Set up fingerprint or face unlock in your phone settings first'); return; }
+  try{
+    const email = state.email || 'budget-cockpit-user';
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'Budget Cockpit', id: location.hostname },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: email, displayName: email },
+      pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'discouraged' },
+      timeout: 60000, attestation: 'none'
+    }});
+    if(!cred) throw new Error('no credential');
+    localStorage.setItem(BIO_KEY, b64uEnc(cred.rawId));
+    refreshBioStatusUI();
+    showToast('Biometric sign-in enabled');
+  }catch(e){
+    showToast('Biometric setup was cancelled or not allowed');
+  }
+}
+function refreshBioStatusUI(){
+  const has = hasBioSet();
+  const supported = bioSupported();
+  const setupBtn = document.getElementById('bioSetupBtn'); if(setupBtn){ setupBtn.style.display = has ? 'none' : ''; setupBtn.disabled = !supported; }
+  const removeBtn = document.getElementById('bioRemoveBtn'); if(removeBtn) removeBtn.style.display = has ? '' : 'none';
+  const t = document.getElementById('bioStatusText');
+  if(t) t.textContent = !supported ? 'Not supported on this browser' : has ? 'Biometrics are on for this device' : 'Not enabled';
+}
+document.getElementById('bioSetupBtn')?.addEventListener('click', enrollBiometrics);
+document.getElementById('bioRemoveBtn')?.addEventListener('click', ()=>{
+  try{ localStorage.removeItem(BIO_KEY); }catch(e){}
+  refreshBioStatusUI();
+  showToast('Biometrics removed');
+});
+
+/* ============================================================
+   PAYDAY SAFETY NET — the scheduled job archives each cycle at 23:59 on
+   payday. If it ever missed (job not registered, project paused, etc.), the
+   dashboard would keep showing the old cycle's spending. Once the app is
+   opened AFTER payday has passed with the previous cycle still unarchived,
+   ask the server to run the same per-user rollover the schedule would have.
+   ============================================================ */
+let rolloverChecking = false;
+async function maybeRolloverIfDue(){
+  if(rolloverChecking || !API_URL || !navigator.onLine || !sessionToken || isDirty || syncSuspended) return;
+  const last = state.lastPayDate, arch = state.lastArchivedPayday || '';
+  if(!last || !arch || arch >= last) return;           // nothing overdue (or baseline not set yet)
+  if(toDateInput(new Date()) <= last) return;          // payday itself — the 23:59 run handles it
+  rolloverChecking = true;
+  try{
+    const r = await apiPost('rolloverIfDue', {});
+    if(r && r.status === 'archived'){
+      const data = await apiGet('getState');
+      if(data && !data.error){
+        state = Object.assign(state, data);
+        refreshCycleDates();
+        renderAll();
+        saveLocalMirror();
+        showToast('New pay cycle started — your previous cycle was archived');
+      }
+    }
+  }catch(e){ /* try again on the next tick */ }
+  finally{ rolloverChecking = false; }
+}
+setInterval(maybeRolloverIfDue, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') maybeRolloverIfDue(); });
 
 /* ============================================================
    INIT
@@ -4099,6 +4417,7 @@ async function boot(){
   showLockScreen(pendingLockMsg);
 }
 boot();
+setTimeout(maybeRolloverIfDue, 6000);
 
 /* ============================================================
    PWA — register service worker (safe no-op if hosted somewhere
