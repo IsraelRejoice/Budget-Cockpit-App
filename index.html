@@ -299,6 +299,15 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Debt tracker */
 .debt-card{margin:0 20px 12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;}
+.lock-tabs{display:flex;gap:6px;margin:0 0 12px;}
+.lock-tab{flex:1;padding:9px 6px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+.lock-tab.active{border-color:var(--gold);color:var(--gold);}
+.pay-hist-row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px;}
+.pay-hist-row:last-child{border-bottom:0;}
+.pay-hist-row .ph-amt{font-weight:700;white-space:nowrap;}
+.pay-hist-row .ph-meta{color:var(--muted);font-size:11.5px;margin-top:2px;line-height:1.4;}
+.debt-card.clickable{cursor:pointer;}
+.debt-hist-hint{font-size:10.5px;color:var(--muted);margin-top:8px;}
 .debt-card.focused{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
 .debt-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;gap:8px;}
 .debt-name{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;}
@@ -652,11 +661,25 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="lock-icon">🔒</div>
     <div class="lock-title">Budget Cockpit</div>
     <p class="lock-sub" id="lockSub">Log in to your budget</p>
+    <div id="lockMethodTabs" class="lock-tabs" style="display:none;">
+      <button type="button" class="lock-tab" id="lockTabPassword" data-method="password">Password</button>
+      <button type="button" class="lock-tab" id="lockTabPin" data-method="pin">PIN</button>
+      <button type="button" class="lock-tab" id="lockTabBio" data-method="bio">Biometrics</button>
+    </div>
+    <div id="lockPinPanel" style="display:none;">
+      <input type="password" id="lockPinInput" class="lock-input" placeholder="6-digit PIN" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" style="text-align:center;letter-spacing:.4em;">
+      <button class="btn btn-primary" id="lockPinBtn" type="button" style="margin-top:10px;">Unlock with PIN</button>
+    </div>
+    <div id="lockBioPanel" style="display:none;">
+      <button class="btn btn-primary" id="lockBioBtn" type="button">Use fingerprint / face</button>
+    </div>
+    <div id="lockPasswordPanel">
     <input type="email" id="lockEmailInput" class="lock-input" placeholder="Email" autocomplete="username" style="margin-bottom:8px;">
     <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
     <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
     <button class="btn btn-ghost" id="lockForgotPwBtn" type="button" style="margin-top:2px;font-size:12px;">Forgot password?</button>
+    </div>
     <div class="lock-spinner" id="lockSpinner" style="display:none;"></div>
     <div class="lock-checking-text" id="lockCheckingText" style="display:none;">Checking your details…</div>
     <div class="lock-error" id="lockError"></div>
@@ -1147,20 +1170,28 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="section"><h2>Security</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;">
-        With a password set on your Supabase account, your login stays active on this device (it renews itself quietly in the background)
-        or for the session length configured server-side. Lock immediately before handing your phone to someone else.
+        You can sign in with your password, a 6-digit PIN, or your fingerprint / face — whichever you prefer. Set up a PIN or biometrics below
+        and "Lock app now" will keep your login safe on this device so you can get back in with any method. Use "Sign out completely"
+        before handing your phone to someone else, or on a device you don't trust.
       </p>
-      <button class="btn btn-ghost" id="lockNowBtn">Lock app now</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;"><button class="btn btn-ghost" id="lockNowBtn">Lock app now</button><button class="btn btn-ghost" id="signOutFullBtn" style="color:var(--red);">Sign out completely</button></div>
 
       <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:16px;">
-        Set a 6-digit PIN for a quick unlock after the app auto-locks from inactivity — faster than typing your full password every time.
-        A PIN is a convenience layer stored only on this device, not a replacement for your account password: after 5 wrong attempts, or
-        if you tap "Forgot PIN", it falls back to a full log-in.
+        Set a 6-digit PIN for a quick unlock. It stays on this device only. After 5 wrong PIN attempts the saved login is discarded and you
+        must use your password.
       </p>
       <div id="pinStatusRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <button class="btn btn-ghost" id="pinSetupBtn">Set up a PIN</button>
         <button class="btn btn-ghost" id="pinRemoveBtn" style="display:none;color:var(--red);">Remove PIN</button>
         <span id="pinStatusText" style="font-size:11px;color:var(--muted);"></span>
+      </div>
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:16px;">
+        Biometrics use your phone's fingerprint or face unlock. It's a convenience lock on this device, and your password always still works.
+      </p>
+      <div id="bioStatusRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-ghost" id="bioSetupBtn">Enable biometrics</button>
+        <button class="btn btn-ghost" id="bioRemoveBtn" style="display:none;color:var(--red);">Remove biometrics</button>
+        <span id="bioStatusText" style="font-size:11px;color:var(--muted);"></span>
       </div>
     </div>
 
@@ -1329,6 +1360,14 @@ body{min-height:100vh; padding-bottom:92px;}
 </div>
 
 <!-- Debt payment sheet -->
+<div class="sheet" id="payHistSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="payHistTitle">Payment history</h3>
+  <p id="payHistSummary" style="font-size:12px;color:var(--muted);margin:-6px 0 10px;line-height:1.5;"></p>
+  <div id="payHistList" style="max-height:52vh;overflow-y:auto;"></div>
+  <button class="btn btn-ghost" id="payHistCloseBtn" style="margin-top:10px;">Close</button>
+</div>
+
 <div class="sheet" id="debtPaySheet">
   <div class="sheet-handle"></div>
   <h3 id="debtPayTitle">Log a payment</h3>
