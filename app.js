@@ -1,4 +1,3 @@
-
 /* ============================================================
    DEFAULT DATA
    ============================================================ */
@@ -83,6 +82,14 @@ function mostRecentPayday(payDay, ref){
 }
 function refreshCycleDates(){
   const today = new Date(); today.setHours(0,0,0,0);
+  if(state.payType === 'wages'){
+    // No fixed schedule: the cycle just runs from cycleStartDate until the
+    // person archives it themselves — there is no "next payday" to compute.
+    if(!state.cycleStartDate) state.cycleStartDate = toDateInput(today);
+    state.lastPayDate = state.cycleStartDate;
+    state.nextPayDate = '';
+    return;
+  }
   const payDay = state.paydayDay || 25;
   const last = mostRecentPayday(payDay, today);
   const next = paydayForMonth(last.getFullYear(), last.getMonth()+1, payDay);
@@ -96,6 +103,8 @@ let state = {
   email: '',
   currency: '₦',
   paydayDay: 25,
+  payType: 'salary',      // 'salary' (fixed monthly payday) | 'wages' (no fixed schedule — manual cycles)
+  cycleStartDate: '',     // wages only: when the current open-ended cycle began
   lastPayDate: '',
   nextPayDate: '',
   categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
@@ -144,7 +153,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -430,6 +439,8 @@ async function loadState(){
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
+  if(state.payType !== 'wages') state.payType = 'salary';
+  if(state.cycleStartDate == null) state.cycleStartDate = '';
   if(state.stateVersion == null) state.stateVersion = 0;
   if(!state.recurringTemplates) state.recurringTemplates = [];
   if(!state.currency) state.currency = '₦';
@@ -684,8 +695,14 @@ function totalLoanRemaining(){ return Math.max(totalLoaned()-totalLoanRepaid(),0
 function daysBetween(a,b){ return Math.round((b-a)/86400000); }
 function cyclePace(){
   const last = new Date(state.lastPayDate+'T00:00:00');
-  const next = new Date(state.nextPayDate+'T00:00:00');
   const now = new Date(); now.setHours(0,0,0,0);
+  if(state.payType === 'wages'){
+    // Open-ended cycle: there's no target end date, so no "days left" or
+    // pace-vs-budget percentage — just how many days it's been running.
+    const elapsed = Math.max(daysBetween(last, now), 0);
+    return { totalDays: null, elapsed, daysLeft: null, pacePct: null };
+  }
+  const next = new Date(state.nextPayDate+'T00:00:00');
   const totalDays = Math.max(daysBetween(last, next), 1);
   let elapsed = daysBetween(last, now);
   elapsed = Math.min(Math.max(elapsed, 0), totalDays);
@@ -807,12 +824,27 @@ function formatPaydayFull(dateStr){
 }
 function updatePaydayCard(){
   document.getElementById('lastPaydayVal').textContent = formatPaydayFull(state.lastPayDate);
+  const cd = document.getElementById('paydayCountdown');
+  const lbl = document.getElementById('lastPaydayLbl');
+  const nextItem = document.getElementById('nextPaydayItem');
+  const arrow = document.getElementById('paydayArrow');
+
+  if(state.payType === 'wages'){
+    lbl.textContent = 'Cycle started';
+    nextItem.style.display = 'none';
+    arrow.style.display = 'none';
+    const { elapsed } = cyclePace();
+    cd.textContent = elapsed <= 0 ? 'Started today' : elapsed + ' day' + (elapsed===1?'':'s') + ' into this cycle';
+    return;
+  }
+  lbl.textContent = 'Last payday';
+  nextItem.style.display = '';
+  arrow.style.display = '';
   document.getElementById('nextPaydayVal').textContent = formatPaydayFull(state.nextPayDate);
 
   const next = new Date(state.nextPayDate+'T00:00:00');
   const now = new Date();
   const msLeft = next - now;
-  const cd = document.getElementById('paydayCountdown');
   if(msLeft <= 0){ cd.textContent = 'Payday is today! 🎉'; return; }
   const totalSec = Math.floor(msLeft/1000);
   const days = Math.floor(totalSec/86400);
@@ -1032,8 +1064,12 @@ function miniDialSVG(pct, colorVar, size){
    ============================================================ */
 function cycleLabelText(){
   const last = new Date(state.lastPayDate+'T00:00:00');
-  const next = new Date(state.nextPayDate+'T00:00:00');
   const opts = {day:'numeric', month:'short'};
+  if(state.payType === 'wages'){
+    const today = new Date(); today.setHours(0,0,0,0);
+    return last.toLocaleDateString('en-GB',opts) + ' – ' + today.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+  }
+  const next = new Date(state.nextPayDate+'T00:00:00');
   return last.toLocaleDateString('en-GB',opts) + ' – ' + next.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 }
 
@@ -1090,15 +1126,30 @@ function renderDashboard(){
 
   const budgetPct = budget>0 ? spent/budget : 0;
   const paceBadge = document.getElementById('paceBadge');
-  const paceDiff = budgetPct - pacePct;
-  if(paceDiff <= -0.05){ paceBadge.textContent = '↓ Ahead of pace'; paceBadge.className = 'pace-badge pace-ahead'; }
-  else if(paceDiff >= 0.05){ paceBadge.textContent = '↑ Behind pace — spending fast'; paceBadge.className = 'pace-badge pace-behind'; }
-  else { paceBadge.textContent = '→ On track'; paceBadge.className = 'pace-badge pace-ontrack'; }
-
+  const safePerDayRow = document.getElementById('safePerDayRow');
+  const daysLeftLbl = document.getElementById('daysLeftLbl');
   const remainingBudget = Math.max(budget - spent, 0);
-  document.getElementById('daysLeft').textContent = daysLeft;
+
+  if(daysLeft === null){
+    // Wages: no target cycle length, so "pace vs. budget" and a per-day
+    // allowance have no meaningful baseline — show how many days the
+    // current cycle has been open instead.
+    paceBadge.style.display = 'none';
+    safePerDayRow.style.display = 'none';
+    daysLeftLbl.textContent = 'Cycle day';
+    document.getElementById('daysLeft').textContent = (cyclePace().elapsed) + 1;
+  } else {
+    paceBadge.style.display = '';
+    safePerDayRow.style.display = '';
+    daysLeftLbl.textContent = 'To payday';
+    const paceDiff = budgetPct - pacePct;
+    if(paceDiff <= -0.05){ paceBadge.textContent = '↓ Ahead of pace'; paceBadge.className = 'pace-badge pace-ahead'; }
+    else if(paceDiff >= 0.05){ paceBadge.textContent = '↑ Behind pace — spending fast'; paceBadge.className = 'pace-badge pace-behind'; }
+    else { paceBadge.textContent = '→ On track'; paceBadge.className = 'pace-badge pace-ontrack'; }
+    document.getElementById('daysLeft').textContent = daysLeft;
+    document.getElementById('statSafePerDay').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
+  }
   document.getElementById('safeToday').textContent = heroBalanceHidden ? (state.currency||'₦') + '••••' : fmt(remaining);
-  document.getElementById('statSafePerDay').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
@@ -2158,6 +2209,8 @@ function renderSettings(){
   document.getElementById('incomeCurrentDisplay').textContent = 'Current: ' + fmt(state.income);
   document.getElementById('emailCurrentDisplay').textContent = 'Current: ' + (state.email || 'not set');
   document.getElementById('paydayInput').value = state.paydayDay || 25;
+  const payTypeSel = document.getElementById('payTypeSelect');
+  if(payTypeSel){ payTypeSel.value = state.payType === 'wages' ? 'wages' : 'salary'; applyPayTypeUI(payTypeSel.value); }
   document.getElementById('cycleCurrentDisplay').textContent = 'Current cycle: ' + cycleLabelText();
 
   const budget = totalBudget();
@@ -2327,6 +2380,7 @@ function renderRecurringList(){
 function renderAll(){
   refreshCycleDates();
   renderDashboard();
+  if(typeof updatePaydayCard === 'function') updatePaydayCard();
   renderSavingsTab();
   renderDebtTab();
   renderLoanTab();
@@ -2847,16 +2901,35 @@ document.getElementById('personalNotesInput').addEventListener('input', (e)=>{
 /* ============================================================
    SETTINGS ACTIONS
    ============================================================ */
+function applyPayTypeUI(payType){
+  const paydayField = document.getElementById('paydayField');
+  const paydayHint = document.getElementById('paydayHint');
+  const wagesHint = document.getElementById('wagesHint');
+  const isWages = payType === 'wages';
+  if(paydayField) paydayField.style.display = isWages ? 'none' : '';
+  if(paydayHint) paydayHint.style.display = isWages ? 'none' : '';
+  if(wagesHint) wagesHint.style.display = isWages ? '' : 'none';
+}
+document.getElementById('payTypeSelect')?.addEventListener('change', (e)=>applyPayTypeUI(e.target.value));
+
 document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
   const incomeVal = document.getElementById('incomeInput').value;
   const payVal = document.getElementById('paydayInput').value;
   const emailVal = document.getElementById('emailInput').value.trim();
   const currencyVal = document.getElementById('currencySelect').value;
+  const payTypeVal = document.getElementById('payTypeSelect')?.value;
 
   if(incomeVal !== '') state.income = Math.max(Number(incomeVal)||0, 0);
   if(payVal !== '') state.paydayDay = Math.min(Math.max(Number(payVal)||25, 1), 28);
   if(emailVal !== '') state.email = emailVal;
   if(currencyVal) state.currency = currencyVal;
+  if(payTypeVal === 'wages' || payTypeVal === 'salary'){
+    const wasWages = state.payType === 'wages';
+    state.payType = payTypeVal;
+    // Switching INTO wages for the first time: start the open-ended cycle
+    // from today rather than inheriting whatever the salary math last had.
+    if(payTypeVal === 'wages' && !wasWages) state.cycleStartDate = toDateInput(new Date());
+  }
 
   refreshCycleDates();
   saveState(); renderAll();
@@ -3589,6 +3662,7 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
 
   state.transactions = [];
   state.extraIncome = [];
+  if(state.payType === 'wages') state.cycleStartDate = toDateInput(new Date());
 
   saveState(); renderAll();
 
