@@ -757,7 +757,7 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="pace-badge" id="paceBadge">On track</div>
         <div class="hero-stat">Income <b id="statIncome">—</b></div>
         <div class="hero-stat">Spent <b id="statSpent">—</b> <span id="spentCompare" style="font-size:10px;"></span></div>
-        <div class="hero-stat">Safe to spend/day <b id="statSafePerDay">—</b></div>
+        <div class="hero-stat" id="safePerDayRow">Safe to spend/day <b id="statSafePerDay">—</b></div>
         <div class="hero-stat budget-check" id="budgetCheck">Budgeted (+savings) <span class="val" id="budgetCheckVal">—</span></div>
       </div>
     </div>
@@ -771,7 +771,7 @@ body{min-height:100vh; padding-bottom:92px;}
     </div>
 
     <div class="chip-row">
-      <div class="chip"><div class="v mono" id="daysLeft">—</div><div class="l">To payday</div></div>
+      <div class="chip"><div class="v mono" id="daysLeft">—</div><div class="l" id="daysLeftLbl">To payday</div></div>
       <div class="chip"><div class="v mono" id="chipSaved">—</div><div class="l">Saved</div></div>
       <div class="chip"><div class="v mono" id="alertCount">—</div><div class="l">Alerts</div></div>
     </div>
@@ -781,11 +781,11 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="payday-card">
       <div class="payday-row">
         <div class="payday-item">
-          <div class="payday-lbl">Last payday</div>
+          <div class="payday-lbl" id="lastPaydayLbl">Last payday</div>
           <div class="payday-val" id="lastPaydayVal">—</div>
         </div>
-        <div class="payday-arrow">→</div>
-        <div class="payday-item">
+        <div class="payday-arrow" id="paydayArrow">→</div>
+        <div class="payday-item" id="nextPaydayItem">
           <div class="payday-lbl">Next payday</div>
           <div class="payday-val" id="nextPaydayVal">—</div>
         </div>
@@ -1076,11 +1076,20 @@ body{min-height:100vh; padding-bottom:92px;}
         <input type="number" id="incomeInput" class="amt-input" inputmode="decimal" min="0" step="1" placeholder="Enter new amount">
       </div>
       <div class="field">
+        <label>How are you paid?</label>
+        <select id="payTypeSelect">
+          <option value="salary">Salary — a fixed date every month</option>
+          <option value="wages">Wages — no fixed schedule</option>
+        </select>
+      </div>
+      <div class="field" id="paydayField">
         <label>Payday (day of month)</label>
         <input type="number" id="paydayInput" min="1" max="28" step="1" placeholder="25">
       </div>
-      <p style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
+      <p id="paydayHint" style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
         If your payday lands on a Saturday or Sunday, it's automatically treated as the Friday before — same as most salary payments.</p>
+      <p id="wagesHint" style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;display:none;">
+        Your cycle runs until you end it yourself — use "Archive this cycle & start fresh" below whenever you're ready to start a new one. Nothing archives automatically.</p>
       <div class="field">
         <div class="current" id="cycleCurrentDisplay">Current cycle: —</div>
       </div>
