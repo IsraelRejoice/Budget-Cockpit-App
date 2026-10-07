@@ -1204,6 +1204,32 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
+    <div class="section"><h2>Daily reminder</h2></div>
+    <div style="margin:0 20px 20px;">
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 14px;">
+        Get a nudge if you haven't logged anything by a time you choose — only on days you haven't already logged an expense.
+      </p>
+      <div class="field">
+        <label><input type="checkbox" id="reminderEnabledCheck" style="width:auto;margin-right:8px;vertical-align:middle;">Remind me</label>
+      </div>
+      <div id="reminderOptions" style="display:none;">
+        <div class="field">
+          <label>Remind me at</label>
+          <input type="time" id="reminderTimeInput" value="20:00">
+        </div>
+        <div class="field">
+          <label>How?</label>
+          <label style="display:block;font-size:13px;margin:4px 0;"><input type="checkbox" id="reminderChanPush" style="width:auto;margin-right:8px;vertical-align:middle;">Push notification (pop-up / banner)</label>
+          <label style="display:block;font-size:13px;margin:4px 0;"><input type="checkbox" id="reminderChanEmail" style="width:auto;margin-right:8px;vertical-align:middle;">Email</label>
+        </div>
+        <div id="reminderPushRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="btn btn-ghost" id="reminderPushEnableBtn">Allow push notifications</button>
+          <span id="reminderPushStatus" style="font-size:11px;color:var(--muted);"></span>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="reminderSaveBtn" style="margin-top:4px;">Save reminder settings</button>
+    </div>
+
     <div class="section"><h2>Privacy</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.6;">
@@ -1369,6 +1395,29 @@ body{min-height:100vh; padding-bottom:92px;}
 </div>
 
 <!-- Debt payment sheet -->
+<div class="sheet" id="debtCashSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="debtCashTitle">What's this loan for?</h3>
+  <p id="debtCashSub" style="font-size:12px;color:var(--muted);margin:-6px 0 14px;line-height:1.5;"></p>
+  <div id="debtCashChoices" style="display:flex;flex-direction:column;gap:8px;">
+    <button class="btn btn-primary" id="debtCashAddBalanceBtn">Add it to my balance — I can spend this</button>
+    <button class="btn btn-ghost" id="debtCashSpentBtn">I've already spent it — log the expense</button>
+    <button class="btn btn-ghost" id="debtCashSkipBtn" style="color:var(--muted);">Just track the debt — don't touch my balance</button>
+  </div>
+  <div id="debtCashSpentForm" style="display:none;margin-top:4px;">
+    <div class="field">
+      <label>What category?</label>
+      <select id="debtCashCategory"></select>
+    </div>
+    <div class="field">
+      <label>What for? (optional)</label>
+      <input type="text" id="debtCashDesc" placeholder="e.g. Rent, car repair, school fees">
+    </div>
+    <button class="btn btn-primary" id="debtCashSpentSaveBtn">Log expense</button>
+    <button class="btn btn-ghost" id="debtCashSpentBackBtn" style="margin-top:8px;">Back</button>
+  </div>
+</div>
+
 <div class="sheet" id="payHistSheet">
   <div class="sheet-handle"></div>
   <h3 id="payHistTitle">Payment history</h3>
