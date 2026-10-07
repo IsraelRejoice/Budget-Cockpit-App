@@ -10,7 +10,7 @@
 // it unchanged after a deploy is the classic cause of "I shipped the fix but
 // the app still behaves like the old version" — which is exactly the
 // symptom pattern seen repeatedly on this project.
-const CACHE_NAME = 'budget-cockpit-v18';
+const CACHE_NAME = 'budget-cockpit-v19';
 const APP_SHELL = [
   './',
   './index.html',
@@ -41,6 +41,45 @@ self.addEventListener('install', (event) => {
     })
   );
   self.skipWaiting();
+});
+
+// Daily expense reminder — shows the push notification the Edge Function
+// sent (see index.ts: sendWebPush / deliverReminder), and routes a tap on
+// it straight to logging an expense instead of just opening the app.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+  const title = data.title || 'Budget Cockpit';
+  const body = data.body || "Haven't logged anything today yet.";
+  const url = data.url || './';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      data: { url },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data && event.notification.data.url || './', self.location.href).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Reuse an already-open tab rather than piling up new ones, and tell
+      // app.js to open the Log Expense sheet via the same postMessage path
+      // it already listens on for other same-tab navigation.
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.focus();
+          client.postMessage({ type: 'notification-click', url: targetUrl });
+          return;
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
 });
 
 self.addEventListener('activate', (event) => {
