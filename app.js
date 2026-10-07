@@ -107,6 +107,9 @@ let state = {
   cycleStartDate: '',     // wages only: when the current open-ended cycle began
   lastPayDate: '',
   nextPayDate: '',
+  reminderEnabled: false,
+  reminderTime: '20:00',
+  reminderChannels: 'push,email',
   categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
   savingsAccumulated: {},  // {categoryId: lifetime total, excluding current uncommitted cycle}
   extraIncome: [],
@@ -153,7 +156,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -441,6 +444,9 @@ async function loadState(){
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
   if(state.payType !== 'wages') state.payType = 'salary';
   if(state.cycleStartDate == null) state.cycleStartDate = '';
+  if(state.reminderEnabled == null) state.reminderEnabled = false;
+  if(!state.reminderTime) state.reminderTime = '20:00';
+  if(!state.reminderChannels) state.reminderChannels = 'push,email';
   if(state.stateVersion == null) state.stateVersion = 0;
   if(!state.recurringTemplates) state.recurringTemplates = [];
   if(!state.currency) state.currency = '₦';
@@ -1902,7 +1908,69 @@ document.getElementById('addDebtBtn').addEventListener('click', ()=>{
   document.getElementById('newDebtReason').value='';
   document.getElementById('newDebtAmount').value='';
   document.getElementById('newDebtInterest').value='';
-  showToast('Debt added');
+  openDebtCashSheet(newDebt);
+});
+
+/* ============================================================
+   DEBT CASH FOLLOW-UP — adding a debt means borrowed money exists
+   somewhere. Without this, that cash never shows up anywhere in the
+   budget even though a liability for it now does. Ask what happened to
+   it: it becomes spendable balance (extra income), an expense already
+   made (extra income + a categorised transaction, so both the cash in
+   and the cash out are accounted for), or purely a liability with no
+   cash movement (e.g. someone else is holding/spending the money).
+   ============================================================ */
+const debtCashSheet = document.getElementById('debtCashSheet');
+let debtCashPending = null;
+function openDebtCashSheet(debt){
+  debtCashPending = debt;
+  document.getElementById('debtCashSub').textContent = debt.creditor + ' — ' + fmt(debt.amount);
+  document.getElementById('debtCashChoices').style.display = 'flex';
+  document.getElementById('debtCashSpentForm').style.display = 'none';
+  document.getElementById('debtCashDesc').value = '';
+  const sel = document.getElementById('debtCashCategory');
+  sel.innerHTML = state.categories.filter(c=>c.group!=='Savings')
+    .map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}</option>`).join('');
+  activeSheet = debtCashSheet; openSheetEl(debtCashSheet);
+}
+function closeDebtCashSheet(){ closeSheetEl(debtCashSheet); activeSheet=null; debtCashPending=null; }
+document.getElementById('debtCashSkipBtn').addEventListener('click', ()=>{
+  closeDebtCashSheet();
+  showToast('Debt added — tracked only');
+});
+document.getElementById('debtCashAddBalanceBtn').addEventListener('click', ()=>{
+  const debt = debtCashPending; if(!debt) return;
+  state.extraIncome.push({ id: uniqueId(), source: debt.creditor + ' — loan received', date: toDateInput(new Date()), amount: debt.amount, debtId: debt.id });
+  saveState(); renderAll();
+  closeDebtCashSheet();
+  showToast('Added to your balance');
+});
+document.getElementById('debtCashSpentBtn').addEventListener('click', ()=>{
+  document.getElementById('debtCashChoices').style.display = 'none';
+  document.getElementById('debtCashSpentForm').style.display = 'block';
+});
+document.getElementById('debtCashSpentBackBtn').addEventListener('click', ()=>{
+  document.getElementById('debtCashSpentForm').style.display = 'none';
+  document.getElementById('debtCashChoices').style.display = 'flex';
+});
+document.getElementById('debtCashSpentSaveBtn').addEventListener('click', ()=>{
+  const debt = debtCashPending; if(!debt) return;
+  const categoryId = document.getElementById('debtCashCategory').value;
+  const desc = document.getElementById('debtCashDesc').value.trim() || (debt.creditor + ' — loan funds');
+  if(!categoryId){ showToast('Choose a category'); return; }
+  const today = toDateInput(new Date());
+  // Both sides of the same cash movement: the loan arriving counts as
+  // income, and what it was spent on counts as a normal categorised
+  // expense — net balance effect is zero, but the category and reports
+  // reflect reality. categoryId is a normal spending category here, not
+  // 'debt' — this is NOT a repayment toward the debt, so debtId is
+  // deliberately left off the transaction (debtId on a transaction means
+  // "this is a payment toward that debt" elsewhere in the app).
+  state.extraIncome.push({ id: uniqueId(), source: debt.creditor + ' — loan received', date: today, amount: debt.amount, debtId: debt.id });
+  state.transactions.push({ id: uniqueId(), amount: debt.amount, categoryId, desc, date: today, method: 'Loan funds' });
+  saveState(); renderAll();
+  closeDebtCashSheet();
+  showToast('Expense logged');
 });
 
 const debtPaySheet = document.getElementById('debtPaySheet');
@@ -2212,6 +2280,7 @@ function renderSettings(){
   const payTypeSel = document.getElementById('payTypeSelect');
   if(payTypeSel){ payTypeSel.value = state.payType === 'wages' ? 'wages' : 'salary'; applyPayTypeUI(payTypeSel.value); }
   document.getElementById('cycleCurrentDisplay').textContent = 'Current cycle: ' + cycleLabelText();
+  refreshReminderUI();
 
   const budget = totalBudget();
   const income = combinedIncome();
@@ -4419,6 +4488,88 @@ document.getElementById('bioRemoveBtn')?.addEventListener('click', ()=>{
   refreshBioStatusUI();
   showToast('Biometrics removed');
 });
+
+/* ============================================================
+   DAILY EXPENSE REMINDER — Settings UI + push subscription.
+   ============================================================ */
+function urlBase64ToUint8Array(base64){
+  const padding = '='.repeat((4 - base64.length % 4) % 4);
+  const base64Safe = (base64 + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw = atob(base64Safe);
+  const out = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function pushSupported(){ return !!(window.PushManager && navigator.serviceWorker); }
+
+function refreshReminderUI(){
+  const en = document.getElementById('reminderEnabledCheck');
+  if(en) en.checked = !!state.reminderEnabled;
+  const opts = document.getElementById('reminderOptions');
+  if(opts) opts.style.display = state.reminderEnabled ? '' : 'none';
+  const t = document.getElementById('reminderTimeInput');
+  if(t) t.value = state.reminderTime || '20:00';
+  const chans = String(state.reminderChannels || 'push,email').split(',').map(c=>c.trim());
+  const pc = document.getElementById('reminderChanPush'); if(pc) pc.checked = chans.includes('push');
+  const ec = document.getElementById('reminderChanEmail'); if(ec) ec.checked = chans.includes('email');
+  refreshReminderPushStatus();
+}
+function refreshReminderPushStatus(){
+  const btn = document.getElementById('reminderPushEnableBtn');
+  const st = document.getElementById('reminderPushStatus');
+  if(!pushSupported()){ if(st) st.textContent='Not supported on this browser'; if(btn) btn.style.display='none'; return; }
+  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){
+    if(st) st.textContent = 'Push not set up yet on this app (missing VAPID key)'; if(btn) btn.style.display='none'; return;
+  }
+  const perm = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
+  if(btn) btn.style.display = perm === 'granted' ? 'none' : '';
+  if(st) st.textContent = perm === 'granted' ? 'Push notifications are on for this device' : perm === 'denied' ? 'Blocked in browser settings' : 'Not enabled yet';
+}
+document.getElementById('reminderEnabledCheck')?.addEventListener('change', (e)=>{
+  document.getElementById('reminderOptions').style.display = e.target.checked ? '' : 'none';
+});
+document.getElementById('reminderPushEnableBtn')?.addEventListener('click', async ()=>{
+  if(!pushSupported()){ showToast('Push notifications are not supported on this browser'); return; }
+  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){ showToast('Push is not set up on this app yet'); return; }
+  try{
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ showToast('Permission not granted'); refreshReminderPushStatus(); return; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+    const json = sub.toJSON();
+    await apiPost('savePushSubscription', { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
+    showToast('Push notifications enabled');
+  }catch(e){
+    showToast('Could not enable push notifications');
+  }
+  refreshReminderPushStatus();
+});
+document.getElementById('reminderSaveBtn')?.addEventListener('click', ()=>{
+  const enabled = !!document.getElementById('reminderEnabledCheck')?.checked;
+  const time = document.getElementById('reminderTimeInput')?.value || '20:00';
+  const chans = [];
+  if(document.getElementById('reminderChanPush')?.checked) chans.push('push');
+  if(document.getElementById('reminderChanEmail')?.checked) chans.push('email');
+  state.reminderEnabled = enabled;
+  state.reminderTime = time;
+  state.reminderChannels = chans.length ? chans.join(',') : 'push,email';
+  saveState();
+  showToast('Reminder settings saved');
+});
+// A tap on the push notification focuses this tab and posts this message
+// (see sw.js notificationclick) — jump straight to logging an expense
+// instead of just sitting on whatever screen was last open.
+navigator.serviceWorker?.addEventListener('message', (event)=>{
+  if(event.data && event.data.type === 'notification-click'){
+    document.getElementById('fabAdd')?.click();
+  }
+});
+// Same deep link when the notification opens a fresh tab/window rather
+// than reusing an existing one.
+if(new URLSearchParams(location.search).get('action') === 'logExpense'){
+  window.addEventListener('load', ()=>{ setTimeout(()=>document.getElementById('fabAdd')?.click(), 400); });
+}
 
 /* ============================================================
    PAYDAY SAFETY NET — the scheduled job archives each cycle at 23:59 on
