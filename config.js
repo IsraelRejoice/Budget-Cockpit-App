@@ -26,4 +26,4 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
    "Enable push notifications" in Settings will show an error instead of
    silently doing nothing.
    ============================================================ */
-const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_VAPID_PUBLIC_KEY';
+const VAPID_PUBLIC_KEY = 'BNzUnBcFKCAubkXD8S_ueR-80FQLTieHxPteqijk3IY6IQE4pJjluVVcPJ7c-jD4utWcISIMYOzuAnC1c56SrJA';
