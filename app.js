@@ -156,7 +156,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.10.1';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -1543,9 +1543,15 @@ function renderExtraIncome(){
 // the same status class barColor() already uses — no new computation, just
 // a second, more expressive way of showing the same information.
 function moodIconFor(cls){
-  const face = cls==='st-over' ? '😬' : cls==='st-near' ? '😅' : '😌';
-  const moodCls = cls==='st-over' ? 'mood-over' : cls==='st-near' ? 'mood-near' : 'mood-ok';
-  return ` <span class="cat-mood ${moodCls}">${face}</span>`;
+  const kind = cls==='st-over' ? 'over' : cls==='st-near' ? 'near' : 'ok';
+  const label = kind==='over' ? 'Over budget' : kind==='near' ? 'Close to budget' : 'On track';
+  const glyph = kind==='ok'
+    ? '<path class="mi-glyph mi-check" d="M5.2 9.4l2.6 2.6 5-5.6"/>'
+    : '<path class="mi-glyph" d="M9 5.2v4.6"/><circle class="mi-dot" cx="9" cy="12.6" r="1"/>';
+  // Inline SVG (no emoji): a ring with a soft expanding pulse. On track
+  // draws a checkmark; close/over show an alert mark, with the pulse
+  // getting faster as the situation gets more urgent.
+  return ` <span class="cat-mood mood-${kind}" role="img" aria-label="${label}"><svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true"><circle class="mi-ring" cx="9" cy="9" r="7.5"/><circle class="mi-pulse" cx="9" cy="9" r="7.5"/>${glyph}</svg></span>`;
 }
 function renderCategoryList(spentMap){
   spentMap = spentMap || spentByCategoryMap(); // callable standalone too
@@ -3832,7 +3838,9 @@ function showLockScreen(msg){
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
   setupLockMethods();
-  ensureTurnstileWidget('turnstileAuthBox');
+  // Only render while the password panel is actually visible — a widget
+  // rendered inside a hidden panel can't show its challenge.
+  if(document.getElementById('lockPasswordPanel').style.display !== 'none') pollTurnstileRender('turnstileAuthBox');
 }
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
@@ -3865,6 +3873,30 @@ function ensureTurnstileWidget(containerId){
     'error-callback': ()=>{ turnstileWidgets[containerId].token = ''; },
   });
   turnstileWidgets[containerId] = { id, token: '' };
+}
+// The Turnstile script loads asynchronously, often AFTER the lock screen is
+// already showing — a single render attempt at show time silently does
+// nothing if it isn't there yet, which left the widget missing forever.
+// Keep trying (up to ~20s) until the script arrives and the widget renders.
+function pollTurnstileRender(containerId){
+  if(!turnstileConfigured()) return;
+  ensureTurnstileWidget(containerId);
+  if(turnstileWidgets[containerId]) return;
+  let tries = 0;
+  const iv = setInterval(()=>{
+    tries++;
+    ensureTurnstileWidget(containerId);
+    if(turnstileWidgets[containerId] || tries >= 40) clearInterval(iv);
+  }, 500);
+}
+// Explains the REAL reason a submit was held back: the widget never showed
+// up (script blocked/offline) versus it's there but not yet solved.
+function turnstileBlockMessage(containerId){
+  if(!turnstileWidgets[containerId]){
+    pollTurnstileRender(containerId);
+    return 'Verification is still loading. If it doesn\'t appear in a few seconds, check your connection or any ad/content blocker, then refresh the page.';
+  }
+  return 'Please complete the verification above';
 }
 function turnstileToken(containerId){ return (turnstileWidgets[containerId] && turnstileWidgets[containerId].token) || ''; }
 function resetTurnstile(containerId){
@@ -3942,7 +3974,7 @@ document.getElementById('lockForgotPwBtn')?.addEventListener('click', ()=>{
   const errEl = document.getElementById('pwResetError'); if(errEl) errEl.textContent = '';
   const okEl = document.getElementById('pwResetSuccess'); if(okEl) okEl.textContent = '';
   showAuthScreen('pwResetRequestScreen');
-  ensureTurnstileWidget('turnstileResetBox');
+  pollTurnstileRender('turnstileResetBox');
 });
 document.getElementById('pwResetBackBtn')?.addEventListener('click', ()=> showAuthScreen('lockScreen'));
 
@@ -3955,7 +3987,7 @@ document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
   errEl.textContent = ''; okEl.textContent = '';
   if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
   const captchaFields = turnstileBodyFields('turnstileResetBox');
-  if(captchaFields === null){ errEl.textContent = 'Please complete the verification above'; return; }
+  if(captchaFields === null){ errEl.textContent = turnstileBlockMessage('turnstileResetBox'); return; }
   if(btn.disabled) return;
   btn.disabled = true; spinner.style.display = '';
   try{
@@ -4067,7 +4099,7 @@ async function doLogin(){
   checkingText.textContent = lockMode === 'signup' ? 'Creating your account…' : 'Checking your details…';
   const captchaFields = turnstileBodyFields('turnstileAuthBox');
   if(captchaFields === null){
-    errEl.textContent = 'Please complete the verification above';
+    errEl.textContent = turnstileBlockMessage('turnstileAuthBox');
     spinner.style.display = 'none'; checkingText.style.display = 'none';
     return;
   }
@@ -4511,6 +4543,7 @@ function setLockMethod(m){
   const sub = document.getElementById('lockSub');
   if(sub && lockMode === 'login') sub.textContent = m === 'pin' ? 'Enter your PIN' : m === 'bio' ? 'Use your fingerprint or face' : 'Log in to your budget';
   document.getElementById('lockError').textContent = '';
+  if(m === 'password') pollTurnstileRender('turnstileAuthBox');
   setTimeout(()=>{
     const f = document.getElementById(m === 'pin' ? 'lockPinInput' : m === 'password' ? 'lockEmailInput' : null);
     if(f) f.focus();
