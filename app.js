@@ -156,7 +156,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -514,6 +514,79 @@ window.addEventListener('online', flushLoanDebtOps);
 setInterval(flushLoanDebtOps, 30000);
 
 let saveTimer = null;
+/* ============================================================
+   OFFLINE CONFLICT MERGE — stateVersion conflicts used to be resolved by
+   discarding this device's unsynced changes entirely and replacing them
+   with whatever the server/another device had, with only a toast telling
+   the person to "redo anything that didn't stick". That's a real data-loss
+   bug for anyone who edits offline and reconnects after another device
+   has synced — exactly what was reported. Instead, merge by record id:
+   keep every record the server knows about, and add back any record this
+   device has that the server doesn't (an offline addition that never made
+   it up yet). A genuinely conflicting edit to the SAME existing record on
+   two devices still can't be auto-merged with only a whole-state version
+   number to go on — the server's copy wins for that one record — but the
+   pre-merge local snapshot is saved as a recoverable backup so that edit
+   is never silently gone, only one tap away in Settings.
+   ============================================================ */
+const CONFLICT_BACKUP_KEY = 'budget-cockpit-conflict-backup';
+const MERGE_ARRAY_FIELDS = ['transactions','extraIncome','debts','loans','loanRepayLog','bills','recurringTemplates','categories'];
+function mergeArraysById(serverArr, localArr){
+  serverArr = Array.isArray(serverArr) ? serverArr : [];
+  localArr = Array.isArray(localArr) ? localArr : [];
+  const serverIds = new Set(serverArr.map(x=>x && x.id));
+  const onlyLocal = localArr.filter(x=>x && x.id!=null && !serverIds.has(x.id));
+  return { merged: serverArr.concat(onlyLocal), recoveredCount: onlyLocal.length };
+}
+function mergeStateOnConflict(serverState, localSnapshot){
+  const merged = Object.assign({}, serverState);
+  let recovered = 0;
+  MERGE_ARRAY_FIELDS.forEach(f=>{
+    const r = mergeArraysById(serverState[f], localSnapshot[f]);
+    merged[f] = r.merged;
+    recovered += r.recoveredCount;
+  });
+  return { merged, recovered };
+}
+function applyConflictMerge(serverState){
+  const localSnapshot = state; // in-memory state as it stood right before this merge
+  try{ localStorage.setItem(CONFLICT_BACKUP_KEY, JSON.stringify({ at: Date.now(), state: localSnapshot })); }catch(e){}
+  const { merged, recovered } = mergeStateOnConflict(serverState, localSnapshot);
+  state = merged;
+  // The merge may have added items the server doesn't have yet — queue
+  // another save so they actually get persisted, not just held in memory.
+  isDirty = true;
+  saveLocalMirror();
+  renderAll();
+  showToast(recovered > 0
+    ? ('Synced — recovered ' + recovered + ' offline item' + (recovered===1?'':'s') + ' from another device\'s update')
+    : 'Synced with an update from another device');
+}
+
+function refreshSyncBackupUI(){
+  const row = document.getElementById('syncBackupRow');
+  if(!row) return;
+  let backup = null;
+  try{ backup = JSON.parse(localStorage.getItem(CONFLICT_BACKUP_KEY) || 'null'); }catch(e){}
+  if(!backup){ row.style.display = 'none'; return; }
+  row.style.display = 'block';
+  document.getElementById('syncBackupDate').textContent = new Date(backup.at).toLocaleString();
+}
+document.getElementById('syncBackupDownloadBtn')?.addEventListener('click', ()=>{
+  let backup = null;
+  try{ backup = JSON.parse(localStorage.getItem(CONFLICT_BACKUP_KEY) || 'null'); }catch(e){}
+  if(!backup) return;
+  const blob = new Blob([JSON.stringify(backup.state, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'budget-cockpit-sync-backup-' + new Date(backup.at).toISOString().slice(0,10) + '.json';
+  a.click();
+});
+document.getElementById('syncBackupDismissBtn')?.addEventListener('click', ()=>{
+  try{ localStorage.removeItem(CONFLICT_BACKUP_KEY); }catch(e){}
+  refreshSyncBackupUI();
+});
+
 function saveState(){
   // Mirror to localStorage immediately and unconditionally — this is what
   // makes offline logging possible: the change is safe on this device the
@@ -538,13 +611,10 @@ function saveState(){
         isDirty = false;
         if(data.conflictResolved && data.state){
           // Something else changed on the server since this device's last
-          // sync — another tab, another device, or an auto-archive. Rather
-          // than blindly overwrite it (the old behavior, which is what was
-          // silently reverting logged repayments and category edits),
-          // adopt the current authoritative state instead.
-          state = Object.assign(state, data.state);
-          renderAll();
-          showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
+          // sync — another tab, another device, or an auto-archive.
+          // applyConflictMerge keeps this device's own offline-added
+          // records rather than discarding them (see its comment above).
+          applyConflictMerge(data.state);
         } else if(data.stateVersion != null){
           // Crucial: without recording the version this save just produced,
           // the very next save would look stale to the backend (comparing
@@ -570,9 +640,7 @@ function trySyncNow(){
     if(data && !data.error){
       isDirty = false; saveLocalMirror(); updateSyncIndicator();
       if(data.conflictResolved && data.state){
-        state = Object.assign(state, data.state);
-        renderAll();
-        showToast('Synced with a change from another tab/device — redo anything that didn\'t stick');
+        applyConflictMerge(data.state);
       } else {
         if(data.stateVersion != null) state.stateVersion = data.stateVersion;
         showToast('Back online — synced ✓');
@@ -2281,6 +2349,7 @@ function renderSettings(){
   if(payTypeSel){ payTypeSel.value = state.payType === 'wages' ? 'wages' : 'salary'; applyPayTypeUI(payTypeSel.value); }
   document.getElementById('cycleCurrentDisplay').textContent = 'Current cycle: ' + cycleLabelText();
   refreshReminderUI();
+  refreshSyncBackupUI();
 
   const budget = totalBudget();
   const income = combinedIncome();
@@ -3763,6 +3832,7 @@ function showLockScreen(msg){
   document.getElementById('lockError').textContent = msg || '';
   document.getElementById('lockPasswordInput').value = '';
   setupLockMethods();
+  ensureTurnstileWidget('turnstileAuthBox');
 }
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
@@ -3771,6 +3841,50 @@ function hideLoadingScreen(){
   const el = document.getElementById('loadingScreen');
   if(el) el.style.display = 'none';
 }
+/* ============================================================
+   BOT PROTECTION — Cloudflare Turnstile on signup, login and password
+   reset. All three are real, unauthenticated Supabase Auth endpoints a
+   script can hit directly with no account needed, which is exactly what
+   automated/bot traffic targets (fake signups, credential stuffing,
+   password-reset email flooding). Dormant until a real Site Key is set in
+   config.js AND CAPTCHA protection is turned on in the Supabase dashboard
+   — see the comment there. Until then this renders nothing and sends no
+   token, so auth behaves exactly as before.
+   ============================================================ */
+const turnstileWidgets = {}; // containerId -> { id, token }
+function turnstileConfigured(){ return !!(typeof TURNSTILE_SITE_KEY !== 'undefined' && TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY.indexOf('REPLACE_WITH') !== 0); }
+function ensureTurnstileWidget(containerId){
+  if(!turnstileConfigured() || typeof turnstile === 'undefined') return;
+  if(turnstileWidgets[containerId]) return; // already rendered
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  const id = turnstile.render('#' + containerId, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token)=>{ turnstileWidgets[containerId].token = token; },
+    'expired-callback': ()=>{ turnstileWidgets[containerId].token = ''; },
+    'error-callback': ()=>{ turnstileWidgets[containerId].token = ''; },
+  });
+  turnstileWidgets[containerId] = { id, token: '' };
+}
+function turnstileToken(containerId){ return (turnstileWidgets[containerId] && turnstileWidgets[containerId].token) || ''; }
+function resetTurnstile(containerId){
+  const w = turnstileWidgets[containerId];
+  if(w && typeof turnstile !== 'undefined') turnstile.reset(w.id);
+  if(w) w.token = '';
+}
+// Builds the extra body fields Supabase's GoTrue expects a CAPTCHA token
+// in (gotrue_meta_security.captcha_token — the same raw shape every
+// official Supabase client library sends). Returns null (meaning "block
+// submission, ask them to verify") only when Turnstile is configured but
+// the widget hasn't actually been solved yet; returns {} when Turnstile
+// isn't set up at all, so the request goes through unchanged.
+function turnstileBodyFields(containerId){
+  if(!turnstileConfigured()) return {};
+  const token = turnstileToken(containerId);
+  if(!token) return null;
+  return { gotrue_meta_security: { captcha_token: token } };
+}
+
 function setLockMode(mode){
   lockMode = mode;
   const sub = document.getElementById('lockSub');
@@ -3828,6 +3942,7 @@ document.getElementById('lockForgotPwBtn')?.addEventListener('click', ()=>{
   const errEl = document.getElementById('pwResetError'); if(errEl) errEl.textContent = '';
   const okEl = document.getElementById('pwResetSuccess'); if(okEl) okEl.textContent = '';
   showAuthScreen('pwResetRequestScreen');
+  ensureTurnstileWidget('turnstileResetBox');
 });
 document.getElementById('pwResetBackBtn')?.addEventListener('click', ()=> showAuthScreen('lockScreen'));
 
@@ -3839,6 +3954,8 @@ document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
   const btn = document.getElementById('pwResetSendBtn');
   errEl.textContent = ''; okEl.textContent = '';
   if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
+  const captchaFields = turnstileBodyFields('turnstileResetBox');
+  if(captchaFields === null){ errEl.textContent = 'Please complete the verification above'; return; }
   if(btn.disabled) return;
   btn.disabled = true; spinner.style.display = '';
   try{
@@ -3846,8 +3963,9 @@ document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
     const res = await fetchWithTimeout(AUTH_URL + '/recover?redirect_to=' + encodeURIComponent(redirectTo), {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
-      body: JSON.stringify({ email })
+      body: JSON.stringify(Object.assign({ email }, captchaFields))
     }, 15000);
+    resetTurnstile('turnstileResetBox');
     // Supabase intentionally returns success here whether or not the email
     // is registered, so this can't be used to probe which emails have
     // accounts — the message below reflects that on purpose, it isn't
@@ -3947,6 +4065,12 @@ async function doLogin(){
   spinner.style.display = '';
   checkingText.style.display = '';
   checkingText.textContent = lockMode === 'signup' ? 'Creating your account…' : 'Checking your details…';
+  const captchaFields = turnstileBodyFields('turnstileAuthBox');
+  if(captchaFields === null){
+    errEl.textContent = 'Please complete the verification above';
+    spinner.style.display = 'none'; checkingText.style.display = 'none';
+    return;
+  }
   btn.disabled = true;
   const originalBtnText = btn.textContent;
   btn.textContent = lockMode === 'signup' ? 'Creating…' : 'Checking…';
@@ -3960,8 +4084,9 @@ async function doLogin(){
       const res = await fetchWithTimeout(AUTH_URL + '/signup', {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
-        body: JSON.stringify({ email, password: pw })
+        body: JSON.stringify(Object.assign({ email, password: pw }, captchaFields))
       }, 15000);
+      resetTurnstile('turnstileAuthBox');
       const data = await res.json();
       if(res.ok && data && data.access_token){
         // Email confirmation is OFF for this project — the new account is
@@ -3989,8 +4114,9 @@ async function doLogin(){
       const res = await fetchWithTimeout(AUTH_URL + '/token?grant_type=password', {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
-        body: JSON.stringify({ email, password: pw })
+        body: JSON.stringify(Object.assign({ email, password: pw }, captchaFields))
       }, 15000);
+      resetTurnstile('turnstileAuthBox');
       const data = await res.json();
       if(res.ok && data && data.access_token){
         storeSession(data);
@@ -4528,34 +4654,64 @@ function refreshReminderPushStatus(){
 document.getElementById('reminderEnabledCheck')?.addEventListener('change', (e)=>{
   document.getElementById('reminderOptions').style.display = e.target.checked ? '' : 'none';
 });
-document.getElementById('reminderPushEnableBtn')?.addEventListener('click', async ()=>{
-  if(!pushSupported()){ showToast('Push notifications are not supported on this browser'); return; }
-  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){ showToast('Push is not set up on this app yet'); return; }
+// Pulled out of the button handler so "Save reminder settings" can call the
+// exact same subscribe flow — see the bug note on reminderSaveBtn below:
+// checking the Push box and hitting Save used to persist reminderEnabled
+// and channels='push' WITHOUT ever actually creating a push subscription,
+// so due_reminders() always found zero subscriptions for that account and
+// nothing could ever be delivered, even though everything "looked" on.
+async function enablePushNotifications(){
+  if(!pushSupported()){ showToast('Push notifications are not supported on this browser'); return false; }
+  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){ showToast('Push is not set up on this app yet'); return false; }
   try{
     const perm = await Notification.requestPermission();
-    if(perm !== 'granted'){ showToast('Permission not granted'); refreshReminderPushStatus(); return; }
+    if(perm !== 'granted'){ showToast('Permission not granted — push stays off, email reminder still works if checked'); refreshReminderPushStatus(); return false; }
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
     const json = sub.toJSON();
     await apiPost('savePushSubscription', { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
-    showToast('Push notifications enabled');
+    refreshReminderPushStatus();
+    return true;
   }catch(e){
     showToast('Could not enable push notifications');
+    refreshReminderPushStatus();
+    return false;
   }
-  refreshReminderPushStatus();
+}
+document.getElementById('reminderPushEnableBtn')?.addEventListener('click', async ()=>{
+  if(await enablePushNotifications()) showToast('Push notifications enabled');
 });
-document.getElementById('reminderSaveBtn')?.addEventListener('click', ()=>{
+document.getElementById('reminderSaveBtn')?.addEventListener('click', async ()=>{
   const enabled = !!document.getElementById('reminderEnabledCheck')?.checked;
   const time = document.getElementById('reminderTimeInput')?.value || '20:00';
+  const wantsPush = !!document.getElementById('reminderChanPush')?.checked;
+  const wantsEmail = !!document.getElementById('reminderChanEmail')?.checked;
   const chans = [];
-  if(document.getElementById('reminderChanPush')?.checked) chans.push('push');
-  if(document.getElementById('reminderChanEmail')?.checked) chans.push('email');
+  if(wantsEmail) chans.push('email');
+
+  let pushReady = false;
+  if(enabled && wantsPush){
+    // This is the actual fix: don't just save "push" as a preference —
+    // always run the real subscribe flow so a subscription genuinely
+    // exists (and is saved server-side) before claiming it's on. Even if
+    // Notification.permission already says "granted" from an earlier
+    // visit, that alone doesn't mean a subscription still exists or was
+    // ever sent to the server — requesting again when already granted is
+    // a no-op prompt per spec, so this is always safe to call.
+    pushReady = await enablePushNotifications();
+    if(pushReady) chans.push('push');
+  }
+
   state.reminderEnabled = enabled;
   state.reminderTime = time;
   state.reminderChannels = chans.length ? chans.join(',') : 'push,email';
   saveState();
-  showToast('Reminder settings saved');
+  if(enabled && wantsPush && !pushReady){
+    showToast(wantsEmail ? 'Saved — email only (push permission wasn\'t granted)' : 'Push permission wasn\'t granted — reminder is off until you allow it');
+  } else {
+    showToast('Reminder settings saved');
+  }
 });
 // A tap on the push notification focuses this tab and posts this message
 // (see sw.js notificationclick) — jump straight to logging an expense
