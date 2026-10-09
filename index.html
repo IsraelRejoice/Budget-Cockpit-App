@@ -678,6 +678,7 @@ body{min-height:100vh; padding-bottom:92px;}
     <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
     <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
+    <div id="turnstileAuthBox" style="margin:10px 0;"></div>
     <button class="btn btn-ghost" id="lockForgotPwBtn" type="button" style="margin-top:2px;font-size:12px;">Forgot password?</button>
     </div>
     <div class="lock-spinner" id="lockSpinner" style="display:none;"></div>
@@ -692,6 +693,7 @@ body{min-height:100vh; padding-bottom:92px;}
     <div class="lock-title">Reset your password</div>
     <p class="lock-sub">Enter the email on your account and we'll send a reset link.</p>
     <input type="email" id="pwResetEmailInput" class="lock-input" placeholder="Email" autocomplete="username">
+    <div id="turnstileResetBox" style="margin:10px 0;"></div>
     <button class="btn btn-primary" id="pwResetSendBtn" style="margin-top:10px;">Send reset link</button>
     <button class="btn btn-ghost" id="pwResetBackBtn" type="button" style="margin-top:8px;">Back to log in</button>
     <div class="lock-spinner" id="pwResetSpinner" style="display:none;"></div>
@@ -1204,6 +1206,16 @@ body{min-height:100vh; padding-bottom:92px;}
       </div>
     </div>
 
+    <div class="section"><h2>Sync</h2></div>
+    <div id="syncBackupRow" style="margin:0 20px 20px;display:none;">
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 10px;">
+        A sync conflict with another device happened on <span id="syncBackupDate"></span>. Most changes were recovered automatically —
+        this is a safety copy of exactly what this device had right before, in case anything still looks off.
+      </p>
+      <button class="btn btn-ghost" id="syncBackupDownloadBtn">Download backup (.json)</button>
+      <button class="btn btn-ghost" id="syncBackupDismissBtn" style="color:var(--muted);">Dismiss</button>
+    </div>
+
     <div class="section"><h2>Daily reminder</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 14px;">
@@ -1551,6 +1563,9 @@ body{min-height:100vh; padding-bottom:92px;}
 
 <div class="toast" id="toast"><span id="toastMsg"></span><button class="toast-undo-btn" id="toastUndoBtn" style="display:none;">Undo</button></div>
 
+<!-- Bot protection on login/signup/password-reset — see config.js for TURNSTILE_SITE_KEY.
+     explicit render so app.js controls exactly when/where each widget renders. -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script src="config.js" defer></script>
 <script src="app.js" defer></script>
 </body>
