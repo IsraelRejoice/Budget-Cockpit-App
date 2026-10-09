@@ -27,3 +27,17 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
    silently doing nothing.
    ============================================================ */
 const VAPID_PUBLIC_KEY = 'BNzUnBcFKCAubkXD8S_ueR-80FQLTieHxPteqijk3IY6IQE4pJjluVVcPJ7c-jD4utWcISIMYOzuAnC1c56SrJA';
+
+/* Bot protection on login, signup and password reset — Cloudflare Turnstile.
+   This is the public Site Key, safe to expose (same as the anon key above).
+   1. Create a Turnstile widget at https://dash.cloudflare.com (Turnstile),
+      add your real domain as the hostname, choose "Managed".
+   2. Paste the Site Key below.
+   3. Paste the Secret Key into Supabase Dashboard → Authentication →
+      Bot and Abuse Protection → Enable CAPTCHA protection → Turnstile.
+   Steps 2 and 3 must both be done together — once Supabase has CAPTCHA
+   enabled, every signup/login/reset needs a valid token or Supabase
+   rejects it outright. Leave this as the placeholder and nothing changes:
+   no widget renders, no token is sent, auth works exactly as before.
+   ============================================================ */
+const TURNSTILE_SITE_KEY = '0x4AAAAAAFSBHW8Cw2sjMC00';
