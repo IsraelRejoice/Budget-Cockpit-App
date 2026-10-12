@@ -156,7 +156,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -1756,13 +1756,29 @@ function renderDebtTab(){
     listWrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No debts added yet.</div>';
   } else {
     listWrap.innerHTML = '';
-    state.debts.forEach(debt=>{
+    // Debts owed to the same person sit together under one header with a
+    // combined total — each keeps its own reason, amount and payment trail.
+    const debtGroups = new Map();
+    state.debts.forEach(d=>{ const k = debtGroupKey(d.creditor); if(!debtGroups.has(k)) debtGroups.set(k, []); debtGroups.get(k).push(d); });
+    const orderedDebts = []; debtGroups.forEach(list=>list.forEach(d=>orderedDebts.push(d)));
+    orderedDebts.forEach(debt=>{
+      const grp = debtGroups.get(debtGroupKey(debt.creditor));
+      if(grp.length > 1 && grp[0].id === debt.id){
+        const gOwed = grp.reduce((sum,d)=>sum + (Number(d.amount)||0), 0);
+        const gPaid = grp.reduce((sum,d)=>sum + (paidMap[d.id]||0), 0);
+        const gDiv = document.createElement('div');
+        gDiv.className = 'debt-group';
+        gDiv.innerHTML = `<div class="dg-top"><span>👥 ${escapeHtml(debt.creditor)}</span><span>${fmt(Math.max(gOwed-gPaid,0))} left</span></div>
+          <div class="dg-sub">${grp.length} separate debts · ${fmt(gOwed)} owed in total · ${fmt(gPaid)} paid</div>
+          <button type="button" data-mergegroup="${escapeHtml(debtGroupKey(debt.creditor))}">Merge into one debt</button>`;
+        listWrap.appendChild(gDiv);
+      }
       const rem = remainingFor(debt);
       const pct = debt.amount>0 ? Math.min((paidMap[debt.id]||0)/debt.amount,1) : 0;
       const isFocused = focus && focus.id===debt.id;
       const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
       const div = document.createElement('div');
-      div.className = 'debt-card' + (isFocused ? ' focused' : '');
+      div.className = 'debt-card' + (isFocused ? ' focused' : '') + (grp.length > 1 ? ' in-group' : '');
       div.innerHTML = `
         <div class="debt-top">
           <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
@@ -1773,6 +1789,7 @@ function renderDebtTab(){
         <div class="debt-foot"><span>${Math.round(pct*100)}% paid</span><span>Owed: ${fmt(debt.amount)}</span></div>
         <div class="debt-actions">
           ${rem>0 ? `<button class="debt-btn-pay" data-pay="${debt.id}">Log payment</button>` : ''}
+          <button class="debt-btn-edit" data-editdebt="${debt.id}">Edit</button>
           ${state.debtStrategy==='manual' && rem>0 ? `<button class="debt-btn-focus" data-focus="${debt.id}">${isFocused?'Focused':'Set as focus'}</button>` : ''}
           <button class="debt-btn-adjust" data-adjustdebt="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Adjust for a payment made previously" title="Log a payment from a past cycle">✎</button>
           <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Delete debt">🗑</button>
@@ -1784,6 +1801,8 @@ function renderDebtTab(){
       div.addEventListener('click', (e)=>{ if(e.target.closest('button')) return; openPayHistory('debt', debt.id); });
     });
     listWrap.querySelectorAll('[data-pay]').forEach(b=>b.addEventListener('click', ()=>openDebtPaySheet(b.dataset.pay)));
+    listWrap.querySelectorAll('[data-editdebt]').forEach(b=>b.addEventListener('click', ()=>openDebtEditSheet(b.dataset.editdebt)));
+    listWrap.querySelectorAll('[data-mergegroup]').forEach(b=>b.addEventListener('click', ()=>mergeDebtGroup(b.dataset.mergegroup)));
     listWrap.querySelectorAll('[data-adjustdebt]').forEach(b=>b.addEventListener('click', ()=>{
       openAdjustSheet({
         type: 'debt', id: b.dataset.adjustdebt,
@@ -2103,9 +2122,9 @@ function histWhen(dateStr, iso){
 }
 function debtPaymentRecords(debtId){
   const recs = [];
-  const add = (t, cycle)=> recs.push({amount: Number(t.amount)||0, date: t.date||'', at: t.createdAt||'', method: t.method||'', cycle});
-  (state.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, 'This cycle'); });
-  (state.history||[]).forEach(h=>(h.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, h.label); }));
+  const add = (t, cycle, source, label)=> recs.push({id: t.id, source, label: label||'', amount: Number(t.amount)||0, date: t.date||'', at: t.createdAt||'', method: t.method||'', cycle});
+  (state.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, 'This cycle', 'current'); });
+  (state.history||[]).forEach(h=>(h.transactions||[]).forEach(t=>{ if(t.debtId === debtId) add(t, h.label, 'archived', h.label); }));
   return recs;
 }
 function loanRepaymentRecords(loanId){
@@ -2124,6 +2143,7 @@ function sortHistRecords(recs){
   const key = r => (r.date || (r.at||'').slice(0,10) || '') ;
   return recs.slice().sort((a,b)=> key(b).localeCompare(key(a)) || (b.at||'').localeCompare(a.at||''));
 }
+let payHistRecs = [], payHistKind = '', payHistItemId = '';
 function openPayHistory(kind, id){
   const isDebt = kind === 'debt';
   const item = isDebt ? debtById(id) : loanById(id);
@@ -2138,11 +2158,12 @@ function openPayHistory(kind, id){
   document.getElementById('payHistSummary').textContent =
     (isDebt ? 'Paid ' : 'Repaid ') + fmt(paidTotal) + ' of ' + fmt(item.amount) + (isDebt ? ' owed' : ' lent') +
     ' · ' + recs.length + (recs.length === 1 ? ' entry' : ' entries');
+  payHistRecs = recs; payHistKind = kind; payHistItemId = id;
   const list = document.getElementById('payHistList');
   if(!recs.length && untracked <= 0.5){
     list.innerHTML = '<div class="empty-hist" style="margin:0;">No ' + (isDebt ? 'payments' : 'repayments') + ' logged yet.</div>';
   } else {
-    let html = recs.map(r=>{
+    let html = recs.map((r, i)=>{
       const w = histWhen(r.date, r.at);
       const meta = [];
       if(w.logged) meta.push(w.logged);
@@ -2151,15 +2172,148 @@ function openPayHistory(kind, id){
       if(r.legacy) meta.push('portion above the amount lent');
       return '<div class="pay-hist-row"><div><div>' + escapeHtml(w.when) + '</div>' +
         (meta.length ? '<div class="ph-meta">' + meta.join(' · ') + '</div>' : '') +
-        '</div><div class="ph-amt">' + fmt(r.amount) + '</div></div>';
+        '</div><div class="ph-amt">' + fmt(r.amount) + (isDebt && r.id ? '<button class="pay-hist-edit" data-editpay="' + i + '">Edit</button>' : '') + '</div></div>';
     }).join('');
     if(untracked > 0.5){
       html += '<div class="pay-hist-row"><div><div>Earlier / adjusted amounts</div><div class="ph-meta">Not itemised — added through the ✎ adjust button or archived before detailed tracking</div></div><div class="ph-amt">' + fmt(untracked) + '</div></div>';
     }
     list.innerHTML = html;
   }
+  list.querySelectorAll('[data-editpay]').forEach(b=>b.addEventListener('click', ()=>openPayEdit(Number(b.dataset.editpay))));
   activeSheet = payHistSheet; openSheetEl(payHistSheet);
 }
+
+/* ============================================================
+   EDIT / DELETE A DEBT PAYMENT (including ones in archived cycles),
+   EDIT A DEBT, and MERGE DEBTS OWED TO THE SAME PERSON.
+   ============================================================ */
+const payEditSheet = document.getElementById('payEditSheet');
+let payEditCtx = null;
+function openPayEdit(idx){
+  const rec = payHistRecs[idx]; if(!rec || payHistKind !== 'debt') return;
+  payEditCtx = { debtId: payHistItemId, rec };
+  document.getElementById('payEditAmount').value = rec.amount;
+  document.getElementById('payEditDate').value = rec.date || '';
+  document.getElementById('payEditNote').textContent = rec.source === 'archived'
+    ? 'This payment is in the archived cycle ' + rec.label + '. Changing it also corrects that cycle\'s totals and how much you\'ve paid on this debt.'
+    : 'Changing this also updates this cycle\'s spending and how much you\'ve paid on this debt.';
+  closeSheetEl(payHistSheet);
+  activeSheet = payEditSheet; openSheetEl(payEditSheet);
+}
+function closePayEdit(reopenHistory){
+  closeSheetEl(payEditSheet); activeSheet = null;
+  const ctx = payEditCtx; payEditCtx = null;
+  if(reopenHistory && ctx) openPayHistory('debt', ctx.debtId);
+}
+function applyDebtPaymentChange(debtId, rec, newAmount, newDate, remove){
+  if(rec.source === 'current'){
+    const tx = state.transactions.find(t=>t.id === rec.id); if(!tx) return false;
+    if(remove) state.transactions = state.transactions.filter(t=>t.id !== rec.id);
+    else { tx.amount = newAmount; if(newDate) tx.date = newDate; }
+    saveState();
+    return true;
+  }
+  const h = (state.history||[]).find(x=>x.label === rec.label); if(!h) return false;
+  const tx = (h.transactions||[]).find(t=>t.id === rec.id); if(!tx) return false;
+  const oldAmt = Number(tx.amount)||0, nw = remove ? 0 : newAmount, delta = nw - oldAmt;
+  if(remove) h.transactions = h.transactions.filter(t=>t.id !== rec.id);
+  else { tx.amount = nw; if(newDate) tx.date = newDate; }
+  // Keep the archived cycle's own totals and the debt's paid-so-far in step.
+  if(isSavingsCat(tx.categoryId)) h.savingsContributed = Math.max(0, (Number(h.savingsContributed)||0) + delta);
+  else h.totalSpent = Math.max(0, (Number(h.totalSpent)||0) + delta);
+  if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
+  state.debtPaidAccumulated[debtId] = Math.max(0, (Number(state.debtPaidAccumulated[debtId])||0) + delta);
+  // Absolute paid-so-far travels with the request so a retry can't apply it twice.
+  queueLoanDebtOp('editArchivedDebtPayment', { label: rec.label, txId: rec.id, amount: nw, date: newDate || '', remove: !!remove, accumulated: state.debtPaidAccumulated[debtId] });
+  saveState();
+  return true;
+}
+document.getElementById('payEditSaveBtn').addEventListener('click', ()=>{
+  const ctx = payEditCtx; if(!ctx) return;
+  const amt = Number(document.getElementById('payEditAmount').value);
+  if(!(amt > 0)){ showToast('Enter an amount above zero — or use Delete'); return; }
+  const date = document.getElementById('payEditDate').value;
+  if(!applyDebtPaymentChange(ctx.debtId, ctx.rec, amt, date, false)){ showToast('Could not find that payment'); closePayEdit(false); return; }
+  renderAll(); closePayEdit(true); showToast('Payment updated');
+});
+document.getElementById('payEditDeleteBtn').addEventListener('click', async ()=>{
+  const ctx = payEditCtx; if(!ctx) return;
+  const ok = await askConfirm('Delete this payment?', fmt(ctx.rec.amount) + ' will be removed' + (ctx.rec.source === 'archived' ? ' from the archived cycle ' + ctx.rec.label : ' from this cycle') + ', and the debt\'s remaining balance goes back up.');
+  if(!ok) return;
+  if(!applyDebtPaymentChange(ctx.debtId, ctx.rec, 0, '', true)){ showToast('Could not find that payment'); closePayEdit(false); return; }
+  renderAll(); closePayEdit(true); showToast('Payment deleted');
+});
+document.getElementById('payEditCancelBtn').addEventListener('click', ()=>closePayEdit(true));
+
+// ---- edit a debt ----
+const debtEditSheet = document.getElementById('debtEditSheet');
+let debtEditId = null;
+function openDebtEditSheet(id){
+  const d = debtById(id); if(!d) return;
+  debtEditId = id;
+  document.getElementById('debtEditCreditor').value = d.creditor || '';
+  document.getElementById('debtEditReason').value = d.reason || '';
+  document.getElementById('debtEditAmount').value = d.amount;
+  document.getElementById('debtEditInterest').value = d.interestRate || '';
+  activeSheet = debtEditSheet; openSheetEl(debtEditSheet);
+}
+document.getElementById('debtEditCancelBtn').addEventListener('click', ()=>{ closeSheetEl(debtEditSheet); activeSheet = null; debtEditId = null; });
+document.getElementById('debtEditSaveBtn').addEventListener('click', ()=>{
+  const d = debtById(debtEditId); if(!d) return;
+  const creditor = document.getElementById('debtEditCreditor').value.trim();
+  const amount = Number(document.getElementById('debtEditAmount').value);
+  if(!creditor){ showToast('Enter who it\'s owed to'); return; }
+  if(!(amount > 0)){ showToast('Enter the total owed'); return; }
+  d.creditor = creditor;
+  d.reason = document.getElementById('debtEditReason').value.trim();
+  d.amount = amount;
+  d.interestRate = Number(document.getElementById('debtEditInterest').value) || 0;
+  queueLoanDebtOp('updateDebt', { debt: { id: d.id, creditor: d.creditor, reason: d.reason, amount: d.amount, interestRate: d.interestRate } });
+  saveState(); renderAll();
+  closeSheetEl(debtEditSheet); activeSheet = null; debtEditId = null;
+  showToast('Debt updated');
+});
+
+// ---- debts owed to the same person ----
+function debtGroupKey(name){ return String(name||'').trim().toLowerCase().replace(/\s+/g,' '); }
+async function mergeDebtGroup(key){
+  const group = state.debts.filter(d=>debtGroupKey(d.creditor) === key);
+  if(group.length < 2) return;
+  const target = group[0], sources = group.slice(1);
+  const paidMap = paidByDebtMap();
+  const total = group.reduce((sum,d)=>sum + (Number(d.amount)||0), 0);
+  const paid = group.reduce((sum,d)=>sum + (paidMap[d.id]||0), 0);
+  const ok = await askConfirm('Merge into one debt?',
+    group.length + ' debts owed to ' + target.creditor + ' become a single debt of ' + fmt(total) + ' (' + fmt(paid) + ' paid so far). Every payment you\'ve logged is kept, but you\'ll no longer see them split by reason. Continue?');
+  if(!ok) return;
+  const reasons = []; group.forEach(d=>{ const r = (d.reason||'').trim(); if(r && !reasons.includes(r)) reasons.push(r); });
+  const reason = reasons.join(' + ');
+  const sourceIds = new Set(sources.map(x=>x.id));
+  if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
+  const acc = group.reduce((sum,d)=>sum + (Number(state.debtPaidAccumulated[d.id])||0), 0);
+  target.amount = total;
+  if(reason) target.reason = reason;
+  state.transactions.forEach(t=>{ if(sourceIds.has(t.debtId)) t.debtId = target.id; });
+  (state.history||[]).forEach(h=>(h.transactions||[]).forEach(t=>{ if(sourceIds.has(t.debtId)) t.debtId = target.id; }));
+  sources.forEach(x=>{ delete state.debtPaidAccumulated[x.id]; });
+  state.debtPaidAccumulated[target.id] = acc;
+  state.debts = state.debts.filter(d=>!sourceIds.has(d.id));
+  if(sourceIds.has(state.debtFocusId)) state.debtFocusId = target.id;
+  queueLoanDebtOp('mergeDebts', { targetId: target.id, sourceIds: [...sourceIds], amount: total, reason, accumulated: acc });
+  saveState(); renderAll();
+  showToast('Merged into one debt');
+}
+document.getElementById('newDebtCreditor').addEventListener('input', ()=>{
+  const hint = document.getElementById('newDebtGroupHint');
+  const key = debtGroupKey(document.getElementById('newDebtCreditor').value);
+  const same = key ? state.debts.filter(d=>debtGroupKey(d.creditor) === key) : [];
+  if(!same.length){ hint.style.display = 'none'; return; }
+  const paidMap = paidByDebtMap();
+  const left = same.reduce((sum,d)=>sum + Math.max((Number(d.amount)||0) - (paidMap[d.id]||0), 0), 0);
+  hint.textContent = 'You already owe ' + same[0].creditor + ' ' + fmt(left) + ' across ' + same.length + ' debt' + (same.length===1?'':'s') + '. This will be added as another debt under the same name — you can merge them any time.';
+  hint.style.display = 'block';
+});
+
 document.getElementById('payHistCloseBtn').addEventListener('click', ()=>{ closeSheetEl(payHistSheet); activeSheet = null; });
 
 /* ============================================================
