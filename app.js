@@ -156,7 +156,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.10.1';
+const APP_VERSION = '1.11.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -466,6 +466,7 @@ async function loadState(){
 
   if(isDirty) trySyncNow(); // push anything queued from an earlier offline session
   flushLoanDebtOps(); // same idea, for any loan/debt add/delete that didn't reach the backend yet
+  maybeStartTour();
 }
 
 // Loans and Debts are persisted via small atomic add/delete calls (see
@@ -4758,6 +4759,117 @@ navigator.serviceWorker?.addEventListener('message', (event)=>{
 // than reusing an existing one.
 if(new URLSearchParams(location.search).get('action') === 'logExpense'){
   window.addEventListener('load', ()=>{ setTimeout(()=>document.getElementById('fabAdd')?.click(), 400); });
+}
+
+
+/* ============================================================
+   APP TOUR — a short, skippable walkthrough: spotlights each main button
+   in turn and says what it's for. Shown once automatically to a brand-new
+   account (no transactions or history yet); anyone can replay it from the
+   Guide tab or Settings. "Seen" is remembered per login on this device.
+   ============================================================ */
+const TOUR_STEPS = [
+  { title:'Welcome to Budget Cockpit 👋', text:"This quick tour shows what each button does. It takes about a minute — and you can skip it any time.", view:'dashboard' },
+  { sel:'.hero-card', view:'dashboard', title:'Your money at a glance', text:'"Available this cycle" is what you can still spend before your next payday, with a bar showing how much of your budget is used. The badge tells you if you\'re ahead of or behind pace.' },
+  { sel:'#privacyToggleBtn', view:'dashboard', title:'Privacy mode', text:'Tap the eye to hide all your figures when someone\'s nearby. Tap again to show them.' },
+  { sel:'#themeToggleBtn', view:'dashboard', title:'Light or dark', text:'Switch between light and dark mode to suit your eyes and your surroundings.' },
+  { sel:'#syncIndicator', view:'dashboard', title:'Sync status', text:'Shows whether your latest changes are saved. You can keep logging with no internet — everything syncs automatically once you\'re back online.' },
+  { sel:'#fabAdd', view:'dashboard', title:'Log an expense', text:'This is the button you\'ll use most. Tap + to record what you spent: amount, category, and a note.' },
+  { sel:'#addExtraBtn', view:'dashboard', title:'Extra income', text:'Got a bonus, gift or side-hustle money? Add it here and it\'s included in what you can spend this cycle.' },
+  { sel:'#catList', view:'dashboard', title:'Spending categories', text:'Each category shows how much of its budget is used. A green tick means on track, amber means getting close, and red means you\'ve gone over.' },
+  { sel:'.nav-btn[data-view="finance"]', view:'dashboard', title:'Finance', text:'Track money you owe (Debt), savings goals, and money you\'ve lent out. Tap any debt or loan to see its payment history.' },
+  { sel:'.nav-btn[data-view="history"]', view:'dashboard', title:'History', text:'Look back at past pay cycles, charts, and every transaction in the current one.' },
+  { sel:'.nav-btn[data-view="guide"]', view:'dashboard', title:'Guide', text:'Answers to common questions, and this tour whenever you want to see it again.' },
+  { sel:'.nav-btn[data-view="settings"]', view:'dashboard', title:'Settings — start here', text:'Set your income and how you\'re paid (salary or wages), category budgets, a PIN or fingerprint login, daily reminders and reports. Set your income first and everything else fills in.' },
+  { title:'You\'re all set 🎉', text:'Start by opening Settings to enter your income, then log your first expense with the + button.', view:'dashboard' },
+];
+let tourIdx = 0, tourActive = false, tourChecked = false;
+function tourUserKey(){
+  let sub = '';
+  try{ sub = JSON.parse(atob((sessionToken||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub || ''; }catch(e){}
+  return 'budget-cockpit-tour-done-' + sub;
+}
+function tourSeen(){ try{ return !!localStorage.getItem(tourUserKey()); }catch(e){ return true; } }
+function markTourSeen(){ try{ localStorage.setItem(tourUserKey(), '1'); }catch(e){} }
+
+function tourPlace(){
+  const step = TOUR_STEPS[tourIdx];
+  const spot = document.getElementById('tourSpot');
+  const card = document.getElementById('tourCard');
+  const target = step.sel ? document.querySelector(step.sel) : null;
+  card.classList.remove('tour-top','tour-bottom','tour-center');
+  const r = target ? target.getBoundingClientRect() : null;
+  if(!r || (r.width === 0 && r.height === 0)){
+    spot.classList.add('tour-nospot');
+    card.classList.add('tour-center');
+    return;
+  }
+  spot.classList.remove('tour-nospot');
+  const pad = 6;
+  spot.style.top = (r.top - pad) + 'px';
+  spot.style.left = (r.left - pad) + 'px';
+  spot.style.width = (r.width + pad*2) + 'px';
+  spot.style.height = (r.height + pad*2) + 'px';
+  // Put the card on whichever half of the screen the target ISN'T in.
+  card.classList.add((r.top + r.height/2) > window.innerHeight/2 ? 'tour-top' : 'tour-bottom');
+}
+function tourShow(i){
+  tourIdx = Math.max(0, Math.min(i, TOUR_STEPS.length - 1));
+  const step = TOUR_STEPS[tourIdx];
+  const navBtn = document.querySelector('.nav-btn[data-view="' + step.view + '"]');
+  const activeView = document.querySelector('.nav-btn.active');
+  if(navBtn && activeView !== navBtn) navBtn.click();
+  document.getElementById('tourStep').textContent = 'Step ' + (tourIdx + 1) + ' of ' + TOUR_STEPS.length;
+  document.getElementById('tourTitle').textContent = step.title;
+  document.getElementById('tourText').textContent = step.text;
+  document.getElementById('tourDots').innerHTML = TOUR_STEPS.map((_,n)=>'<span class="tour-dot' + (n === tourIdx ? ' on' : '') + '"></span>').join('');
+  document.getElementById('tourBackBtn').style.display = tourIdx === 0 ? 'none' : '';
+  document.getElementById('tourNextBtn').textContent = tourIdx === TOUR_STEPS.length - 1 ? 'Get started' : (tourIdx === 0 ? 'Start tour' : 'Next');
+  document.getElementById('tourSkipBtn').style.display = tourIdx === TOUR_STEPS.length - 1 ? 'none' : '';
+  const target = step.sel ? document.querySelector(step.sel) : null;
+  if(target && target.scrollIntoView) target.scrollIntoView({block:'center', behavior:'auto'});
+  requestAnimationFrame(tourPlace);
+}
+function startTour(){
+  if(tourActive) return;
+  tourActive = true;
+  ['tourBlock','tourSpot','tourCard'].forEach(id=>{ document.getElementById(id).style.display = 'block'; });
+  tourShow(0);
+}
+function endTour(){
+  tourActive = false;
+  markTourSeen();
+  ['tourBlock','tourSpot','tourCard'].forEach(id=>{ document.getElementById(id).style.display = 'none'; });
+  window.scrollTo(0, 0);
+}
+document.getElementById('tourNextBtn').addEventListener('click', ()=>{
+  if(tourIdx >= TOUR_STEPS.length - 1) endTour(); else tourShow(tourIdx + 1);
+});
+document.getElementById('tourBackBtn').addEventListener('click', ()=>tourShow(tourIdx - 1));
+document.getElementById('tourSkipBtn').addEventListener('click', endTour);
+document.addEventListener('keydown', (e)=>{
+  if(!tourActive) return;
+  if(e.key === 'Escape') endTour();
+  else if(e.key === 'ArrowRight') document.getElementById('tourNextBtn').click();
+  else if(e.key === 'ArrowLeft' && tourIdx > 0) tourShow(tourIdx - 1);
+});
+window.addEventListener('resize', ()=>{ if(tourActive) tourPlace(); });
+document.getElementById('tourReplayGuideBtn')?.addEventListener('click', startTour);
+document.getElementById('tourReplaySettingsBtn')?.addEventListener('click', startTour);
+
+// Called once per page load after the app has loaded. Only auto-starts for
+// a genuinely new account — someone with data already doesn't need it
+// thrust at them, and can replay it from Guide/Settings whenever.
+function maybeStartTour(){
+  if(tourChecked) return;
+  tourChecked = true;
+  setTimeout(()=>{
+    if(tourSeen() || tourActive) return;
+    const lock = document.getElementById('lockScreen');
+    if(lock && lock.style.display === 'flex') return;
+    const isNew = !(state.transactions||[]).length && !(state.history||[]).length;
+    if(isNew) startTour();
+  }, 900);
 }
 
 /* ============================================================
