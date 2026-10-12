@@ -535,6 +535,24 @@ body{min-height:100vh; padding-bottom:92px;}
 
 /* Category mood icons — reacts to how a category is doing, no extra cost:
    the status was already computed for the bar color, this just displays it */
+/* ---- First-launch app tour ---- */
+.tour-block{position:fixed;inset:0;z-index:9000;background:transparent;}
+.tour-spot{position:fixed;z-index:9001;border-radius:14px;pointer-events:none;box-shadow:0 0 0 9999px rgba(5,8,14,.72),0 0 0 2px var(--gold);transition:top .25s ease,left .25s ease,width .25s ease,height .25s ease;}
+.tour-spot.tour-nospot{box-shadow:0 0 0 9999px rgba(5,8,14,.72);width:0;height:0;top:50%;left:50%;}
+.tour-card{position:fixed;left:16px;right:16px;max-width:420px;margin:0 auto;z-index:9002;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px;box-shadow:var(--shadow);}
+.tour-card.tour-top{top:max(16px,env(safe-area-inset-top));}
+.tour-card.tour-bottom{bottom:max(16px,env(safe-area-inset-bottom));}
+.tour-card.tour-center{top:50%;transform:translateY(-50%);}
+.tour-step{font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px;}
+.tour-title{font-size:17px;font-weight:700;margin:0 0 6px;}
+.tour-text{font-size:13px;line-height:1.55;color:var(--muted);margin:0 0 14px;}
+.tour-dots{display:flex;gap:5px;margin-bottom:12px;}
+.tour-dot{width:6px;height:6px;border-radius:50%;background:var(--line);}
+.tour-dot.on{background:var(--gold);}
+.tour-actions{display:flex;gap:8px;align-items:center;}
+.tour-actions .btn{margin:0;width:auto;padding:10px 16px;font-size:13px;}
+.tour-skip{margin-right:auto;background:none;border:0;color:var(--muted);font-size:12px;cursor:pointer;padding:6px 2px;font-family:inherit;}
+@media (prefers-reduced-motion: reduce){ .tour-spot{transition:none;} }
 .cat-mood{display:inline-flex;vertical-align:middle;margin-left:6px;width:16px;height:16px;}
 .cat-mood svg{overflow:visible;display:block;}
 .cat-mood .mi-ring{fill:none;stroke:currentColor;stroke-width:1.6;}
@@ -973,6 +991,7 @@ body{min-height:100vh; padding-bottom:92px;}
   <!-- ================= GUIDE ================= -->
   <div class="view" id="view-guide">
     <div class="header"><div><div class="eyebrow">Budget Cockpit</div><div class="h1">Guide & FAQ</div></div></div>
+    <div style="margin:0 20px 14px;"><button class="btn btn-primary" id="tourReplayGuideBtn" type="button">▶ Take the app tour</button></div>
 
     <div class="guide-block">
       <h3>How this app works</h3>
@@ -1265,6 +1284,7 @@ body{min-height:100vh; padding-bottom:92px;}
 
     <div class="section"><h2>About</h2></div>
     <div style="margin:0 20px 30px;">
+      <button class="btn btn-ghost" id="tourReplaySettingsBtn" type="button" style="margin-bottom:12px;">▶ Take the app tour again</button>
       <p style="font-size:11px;color:var(--muted);">Budget Cockpit v<span id="appVersionText"></span></p>
     </div>
   </div>
@@ -1420,6 +1440,20 @@ body{min-height:100vh; padding-bottom:92px;}
 </div>
 
 <!-- Debt payment sheet -->
+<div class="tour-block" id="tourBlock" style="display:none;"></div>
+<div class="tour-spot" id="tourSpot" style="display:none;"></div>
+<div class="tour-card" id="tourCard" role="dialog" aria-modal="true" aria-labelledby="tourTitle" style="display:none;">
+  <div class="tour-step" id="tourStep"></div>
+  <h3 class="tour-title" id="tourTitle"></h3>
+  <p class="tour-text" id="tourText"></p>
+  <div class="tour-dots" id="tourDots"></div>
+  <div class="tour-actions">
+    <button class="tour-skip" id="tourSkipBtn" type="button">Skip tour</button>
+    <button class="btn btn-ghost" id="tourBackBtn" type="button">Back</button>
+    <button class="btn btn-primary" id="tourNextBtn" type="button">Next</button>
+  </div>
+</div>
+
 <div class="sheet" id="debtCashSheet">
   <div class="sheet-handle"></div>
   <h3 id="debtCashTitle">What's this loan for?</h3>
