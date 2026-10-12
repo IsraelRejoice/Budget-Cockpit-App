@@ -322,6 +322,14 @@ body{min-height:100vh; padding-bottom:92px;}
 .debt-btn-pay{background:linear-gradient(135deg,var(--teal),#279684);color:#06231e;border:none;}
 .debt-btn-focus{background:var(--panel-2);color:var(--gold);border:1px solid var(--line);}
 .debt-btn-del{background:rgba(255,59,48,.1);color:var(--red);border:1px solid rgba(255,59,48,.25);flex:none;width:40px;}
+.debt-btn-edit{background:var(--panel-2);color:var(--text);border:1px solid var(--line);}
+.debt-card.in-group{border-left:3px solid var(--gold);}
+.debt-group{margin:14px 20px 6px;padding:12px 14px;border-radius:14px;background:var(--panel-2);border:1px solid var(--line);}
+.debt-group .dg-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-weight:700;font-size:14px;}
+.debt-group .dg-sub{font-size:11.5px;color:var(--muted);margin:4px 0 10px;line-height:1.5;}
+.debt-group button{margin:0;padding:8px 12px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--gold);font-family:inherit;}
+.pay-hist-edit{display:block;margin:6px 0 0 auto;background:none;border:0;color:var(--gold);font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 0;font-family:inherit;}
+.debt-hint{font-size:11.5px;color:var(--gold);margin:6px 2px 0;line-height:1.45;}
 .debt-btn-adjust{background:rgba(255,194,77,.12);color:var(--gold);border:1px solid rgba(255,194,77,.3);flex:none;width:40px;}
 .focus-badge{display:inline-block;font-size:9.5px;font-weight:700;color:#1a1200;background:var(--gold);
   padding:2px 8px;border-radius:10px;margin-bottom:6px;letter-spacing:.03em;}
@@ -909,6 +917,7 @@ body{min-height:100vh; padding-bottom:92px;}
         <div class="field">
           <label>Owed to (creditor)</label>
           <input type="text" id="newDebtCreditor" placeholder="e.g. Mum, Access Bank, FairMoney">
+          <div class="debt-hint" id="newDebtGroupHint" style="display:none;"></div>
         </div>
         <div class="field">
           <label>Reason</label>
@@ -1475,6 +1484,29 @@ body{min-height:100vh; padding-bottom:92px;}
     <button class="btn btn-primary" id="debtCashSpentSaveBtn">Log expense</button>
     <button class="btn btn-ghost" id="debtCashSpentBackBtn" style="margin-top:8px;">Back</button>
   </div>
+</div>
+
+<div class="sheet" id="payEditSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="payEditTitle">Edit payment</h3>
+  <p id="payEditNote" style="font-size:12px;color:var(--muted);margin:-6px 0 12px;line-height:1.5;"></p>
+  <div class="field"><label>Amount</label><input type="number" id="payEditAmount" min="0" step="1"></div>
+  <div class="field"><label>Date</label><input type="date" id="payEditDate"></div>
+  <button class="btn btn-primary" id="payEditSaveBtn">Save changes</button>
+  <button class="btn btn-danger" id="payEditDeleteBtn" style="margin-top:8px;">Delete this payment</button>
+  <button class="btn btn-ghost" id="payEditCancelBtn" style="margin-top:8px;">Cancel</button>
+</div>
+
+<div class="sheet" id="debtEditSheet">
+  <div class="sheet-handle"></div>
+  <h3>Edit debt</h3>
+  <p style="font-size:12px;color:var(--muted);margin:-6px 0 12px;line-height:1.5;">Change who it's owed to, why, or the total owed. Payments already logged stay attached to this debt.</p>
+  <div class="field"><label>Owed to</label><input type="text" id="debtEditCreditor"></div>
+  <div class="field"><label>Reason</label><input type="text" id="debtEditReason"></div>
+  <div class="field"><label>Total owed</label><input type="number" id="debtEditAmount" min="0" step="1"></div>
+  <div class="field"><label>Interest rate (%/yr)</label><input type="number" id="debtEditInterest" min="0" step="0.1"></div>
+  <button class="btn btn-primary" id="debtEditSaveBtn">Save changes</button>
+  <button class="btn btn-ghost" id="debtEditCancelBtn" style="margin-top:8px;">Cancel</button>
 </div>
 
 <div class="sheet" id="payHistSheet">
