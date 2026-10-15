@@ -127,11 +127,101 @@ let state = {
   shares: []                // {id, token, createdAt} — active shareable report links (local cache of what's on the server)
 };
 
+// Keyed by SYMBOL (that's what's stored on the account), so every symbol here
+// must be unique — $ stays US Dollar for existing accounts, and the other
+// dollar currencies use distinct prefixes (CA$, A$, NZ$, ...). The first 11
+// are the most commonly used; the rest are grouped by region.
 const CURRENCY_OPTIONS = [
-  {sym:'₦', code:'NGN', label:'₦ Naira'}, {sym:'$', code:'USD', label:'$ Dollar'}, {sym:'£', code:'GBP', label:'£ Pound'},
-  {sym:'€', code:'EUR', label:'€ Euro'}, {sym:'R', code:'ZAR', label:'R Rand'}, {sym:'₵', code:'GHS', label:'₵ Cedi'},
-  {sym:'KSh', code:'KES', label:'KSh Kenyan Shilling'}, {sym:'₹', code:'INR', label:'₹ Rupee'}
+  {sym:'₦', code:'NGN', label:'₦ Nigerian Naira (NGN)'},
+  {sym:'$', code:'USD', label:'$ US Dollar (USD)'},
+  {sym:'£', code:'GBP', label:'£ British Pound (GBP)'},
+  {sym:'€', code:'EUR', label:'€ Euro (EUR)'},
+  {sym:'CA$', code:'CAD', label:'CA$ Canadian Dollar (CAD)'},
+  {sym:'A$', code:'AUD', label:'A$ Australian Dollar (AUD)'},
+  {sym:'NZ$', code:'NZD', label:'NZ$ New Zealand Dollar (NZD)'},
+  {sym:'R', code:'ZAR', label:'R South African Rand (ZAR)'},
+  {sym:'₵', code:'GHS', label:'₵ Ghanaian Cedi (GHS)'},
+  {sym:'KSh', code:'KES', label:'KSh Kenyan Shilling (KES)'},
+  {sym:'₹', code:'INR', label:'₹ Indian Rupee (INR)'},
+  {sym:'CFA', code:'XOF', label:'CFA West African CFA Franc (XOF)'},
+  {sym:'FCFA', code:'XAF', label:'FCFA Central African CFA Franc (XAF)'},
+  {sym:'E£', code:'EGP', label:'E£ Egyptian Pound (EGP)'},
+  {sym:'MAD', code:'MAD', label:'MAD Moroccan Dirham (MAD)'},
+  {sym:'TSh', code:'TZS', label:'TSh Tanzanian Shilling (TZS)'},
+  {sym:'USh', code:'UGX', label:'USh Ugandan Shilling (UGX)'},
+  {sym:'RF', code:'RWF', label:'RF Rwandan Franc (RWF)'},
+  {sym:'ZK', code:'ZMW', label:'ZK Zambian Kwacha (ZMW)'},
+  {sym:'Br', code:'ETB', label:'Br Ethiopian Birr (ETB)'},
+  {sym:'P', code:'BWP', label:'P Botswana Pula (BWP)'},
+  {sym:'N$', code:'NAD', label:'N$ Namibian Dollar (NAD)'},
+  {sym:'MUR', code:'MUR', label:'MUR Mauritian Rupee (MUR)'},
+  {sym:'DZD', code:'DZD', label:'DZD Algerian Dinar (DZD)'},
+  {sym:'DT', code:'TND', label:'DT Tunisian Dinar (TND)'},
+  {sym:'MT', code:'MZN', label:'MT Mozambican Metical (MZN)'},
+  {sym:'Kz', code:'AOA', label:'Kz Angolan Kwanza (AOA)'},
+  {sym:'Le', code:'SLE', label:'Le Sierra Leonean Leone (SLE)'},
+  {sym:'L$', code:'LRD', label:'L$ Liberian Dollar (LRD)'},
+  {sym:'D', code:'GMD', label:'D Gambian Dalasi (GMD)'},
+  {sym:'MK', code:'MWK', label:'MK Malawian Kwacha (MWK)'},
+  {sym:'FC', code:'CDF', label:'FC Congolese Franc (CDF)'},
+  {sym:'FG', code:'GNF', label:'FG Guinean Franc (GNF)'},
+  {sym:'R$', code:'BRL', label:'R$ Brazilian Real (BRL)'},
+  {sym:'MX$', code:'MXN', label:'MX$ Mexican Peso (MXN)'},
+  {sym:'AR$', code:'ARS', label:'AR$ Argentine Peso (ARS)'},
+  {sym:'CLP', code:'CLP', label:'CLP Chilean Peso (CLP)'},
+  {sym:'COL$', code:'COP', label:'COL$ Colombian Peso (COP)'},
+  {sym:'S/', code:'PEN', label:'S/ Peruvian Sol (PEN)'},
+  {sym:'J$', code:'JMD', label:'J$ Jamaican Dollar (JMD)'},
+  {sym:'TT$', code:'TTD', label:'TT$ Trinidad & Tobago Dollar (TTD)'},
+  {sym:'RD$', code:'DOP', label:'RD$ Dominican Peso (DOP)'},
+  {sym:'Q', code:'GTQ', label:'Q Guatemalan Quetzal (GTQ)'},
+  {sym:'₡', code:'CRC', label:'₡ Costa Rican Colón (CRC)'},
+  {sym:'$U', code:'UYU', label:'$U Uruguayan Peso (UYU)'},
+  {sym:'Bs', code:'BOB', label:'Bs Bolivian Boliviano (BOB)'},
+  {sym:'₲', code:'PYG', label:'₲ Paraguayan Guaraní (PYG)'},
+  {sym:'CHF', code:'CHF', label:'CHF Swiss Franc (CHF)'},
+  {sym:'SEK', code:'SEK', label:'SEK Swedish Krona (SEK)'},
+  {sym:'NOK', code:'NOK', label:'NOK Norwegian Krone (NOK)'},
+  {sym:'DKK', code:'DKK', label:'DKK Danish Krone (DKK)'},
+  {sym:'zł', code:'PLN', label:'zł Polish Złoty (PLN)'},
+  {sym:'Kč', code:'CZK', label:'Kč Czech Koruna (CZK)'},
+  {sym:'Ft', code:'HUF', label:'Ft Hungarian Forint (HUF)'},
+  {sym:'lei', code:'RON', label:'lei Romanian Leu (RON)'},
+  {sym:'лв', code:'BGN', label:'лв Bulgarian Lev (BGN)'},
+  {sym:'ISK', code:'ISK', label:'ISK Icelandic Króna (ISK)'},
+  {sym:'₴', code:'UAH', label:'₴ Ukrainian Hryvnia (UAH)'},
+  {sym:'₽', code:'RUB', label:'₽ Russian Ruble (RUB)'},
+  {sym:'₺', code:'TRY', label:'₺ Turkish Lira (TRY)'},
+  {sym:'RSD', code:'RSD', label:'RSD Serbian Dinar (RSD)'},
+  {sym:'₾', code:'GEL', label:'₾ Georgian Lari (GEL)'},
+  {sym:'₸', code:'KZT', label:'₸ Kazakhstani Tenge (KZT)'},
+  {sym:'AED', code:'AED', label:'AED UAE Dirham (AED)'},
+  {sym:'SAR', code:'SAR', label:'SAR Saudi Riyal (SAR)'},
+  {sym:'QAR', code:'QAR', label:'QAR Qatari Riyal (QAR)'},
+  {sym:'KWD', code:'KWD', label:'KWD Kuwaiti Dinar (KWD)'},
+  {sym:'BHD', code:'BHD', label:'BHD Bahraini Dinar (BHD)'},
+  {sym:'OMR', code:'OMR', label:'OMR Omani Rial (OMR)'},
+  {sym:'JOD', code:'JOD', label:'JOD Jordanian Dinar (JOD)'},
+  {sym:'₪', code:'ILS', label:'₪ Israeli Shekel (ILS)'},
+  {sym:'¥', code:'JPY', label:'¥ Japanese Yen (JPY)'},
+  {sym:'CN¥', code:'CNY', label:'CN¥ Chinese Yuan (CNY)'},
+  {sym:'HK$', code:'HKD', label:'HK$ Hong Kong Dollar (HKD)'},
+  {sym:'S$', code:'SGD', label:'S$ Singapore Dollar (SGD)'},
+  {sym:'₩', code:'KRW', label:'₩ South Korean Won (KRW)'},
+  {sym:'฿', code:'THB', label:'฿ Thai Baht (THB)'},
+  {sym:'RM', code:'MYR', label:'RM Malaysian Ringgit (MYR)'},
+  {sym:'Rp', code:'IDR', label:'Rp Indonesian Rupiah (IDR)'},
+  {sym:'₱', code:'PHP', label:'₱ Philippine Peso (PHP)'},
+  {sym:'₫', code:'VND', label:'₫ Vietnamese Dong (VND)'},
+  {sym:'PKR', code:'PKR', label:'PKR Pakistani Rupee (PKR)'},
+  {sym:'৳', code:'BDT', label:'৳ Bangladeshi Taka (BDT)'},
+  {sym:'LKR', code:'LKR', label:'LKR Sri Lankan Rupee (LKR)'},
+  {sym:'NPR', code:'NPR', label:'NPR Nepalese Rupee (NPR)'},
+  {sym:'NT$', code:'TWD', label:'NT$ New Taiwan Dollar (TWD)'}
 ];
+// Letter-only symbols of 3+ characters (CHF, SEK, KSh…) read better with a space
+// before the number: "CHF 1,200" rather than "CHF1,200".
+function symSep(sym){ return /^[A-Za-z]{3,}$/.test(sym||'') ? ' ' : ''; }
 function currencyCodeFor(sym){
   const c = CURRENCY_OPTIONS.find(x=>x.sym===sym);
   return c ? c.code : 'NGN';
@@ -156,7 +246,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -675,7 +765,7 @@ function fmt(n){
   n = Math.round(n||0);
   const sym = state.currency || '₦';
   if(privacyMode) return sym + '••••'; // fixed-length mask — doesn't leak magnitude via digit count
-  return sym + n.toLocaleString('en-NG');
+  return sym + symSep(sym) + n.toLocaleString('en-NG');
 }
 function catById(id){ return state.categories.find(c=>c.id===id); }
 function isSavingsCat(id){ const c = catById(id); return !!(c && c.group==='Savings'); }
@@ -737,8 +827,13 @@ function paidByDebtMap(){
   });
   return m;
 }
-function remainingForDebt(debt){ return Math.max(Number(debt.amount) - paidForDebt(debt.id), 0); }
-function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount),0); }
+// A write-off cancels part (or all) of what's left without any money moving —
+// the creditor forgave it, or you chose to forgive a loan. It counts as
+// settled, so it leaves "owed"/"remaining" but never touches your balance.
+function writtenOffFor(item){ return Math.min(Math.max(Number(item && item.writtenOff) || 0, 0), Number(item && item.amount) || 0); }
+function remainingForDebt(debt){ return Math.max(Number(debt.amount) - writtenOffFor(debt) - paidForDebt(debt.id), 0); }
+function totalDebtOwed(){ return state.debts.reduce((s,d)=>s+Number(d.amount)-writtenOffFor(d),0); }
+function totalDebtWrittenOff(){ return state.debts.reduce((s,d)=>s+writtenOffFor(d),0); }
 function totalDebtPaid(){ return state.debts.reduce((s,d)=>s+paidForDebt(d.id),0); }
 function totalDebtRemaining(){ return Math.max(totalDebtOwed()-totalDebtPaid(),0); }
 function activeDebts(){ return state.debts.filter(d=>remainingForDebt(d)>0); }
@@ -762,8 +857,9 @@ function loanById(id){ return state.loans.find(l=>l.id===id); }
 function paidForLoan(loanId){
   return (state.loanPaidAccumulated && state.loanPaidAccumulated[loanId]) || 0;
 }
-function remainingForLoan(loan){ return Math.max(Number(loan.amount) - paidForLoan(loan.id), 0); }
-function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount),0); }
+function remainingForLoan(loan){ return Math.max(Number(loan.amount) - writtenOffFor(loan) - paidForLoan(loan.id), 0); }
+function totalLoaned(){ return state.loans.reduce((s,l)=>s+Number(l.amount)-writtenOffFor(l),0); }
+function totalLoanWrittenOff(){ return state.loans.reduce((s,l)=>s+writtenOffFor(l),0); }
 function totalLoanRepaid(){ return state.loans.reduce((s,l)=>s+paidForLoan(l.id),0); }
 function totalLoanRemaining(){ return Math.max(totalLoaned()-totalLoanRepaid(),0); }
 
@@ -1160,7 +1256,7 @@ function renderDashboard(){
   // — if you're showing someone your budget/spending but not your income —
   // while Budget and Spent stay visible either way, since those were never
   // part of what this toggle was meant to hide.
-  setTextFlash('statIncome', heroBalanceHidden ? (state.currency||'₦') + '••••' : fmt(income));
+  setTextFlash('statIncome', heroBalanceHidden ? (state.currency||'₦') + symSep(state.currency||'₦') + '••••' : fmt(income));
   setTextFlash('statSpent', fmt(spent));
 
   const compareEl = document.getElementById('spentCompare');
@@ -1224,7 +1320,7 @@ function renderDashboard(){
     document.getElementById('daysLeft').textContent = daysLeft;
     document.getElementById('statSafePerDay').textContent = fmt(remainingBudget/Math.max(daysLeft,1));
   }
-  document.getElementById('safeToday').textContent = heroBalanceHidden ? (state.currency||'₦') + '••••' : fmt(remaining);
+  document.getElementById('safeToday').textContent = heroBalanceHidden ? (state.currency||'₦') + symSep(state.currency||'₦') + '••••' : fmt(remaining);
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
@@ -1520,7 +1616,7 @@ function renderExtraIncome(){
     const row = document.createElement('div');
     row.className = 'extra-row';
     const fxNote = e.fxOriginalCurrency
-      ? `${escapeHtml(e.fxOriginalCurrency)}${e.fxOriginalAmount} converted @ ${Number(e.fxRate).toFixed(2)} (${escapeHtml(e.fxRateDate||'')})`
+      ? `${escapeHtml(e.fxOriginalCurrency)}${symSep(e.fxOriginalCurrency)}${e.fxOriginalAmount} converted @ ${Number(e.fxRate).toFixed(2)} (${escapeHtml(e.fxRateDate||'')})`
       : e.date;
     row.innerHTML = `
       <div class="extra-left">
@@ -1705,7 +1801,7 @@ function renderDebtTab(){
   document.getElementById('stratManual').classList.toggle('active', state.debtStrategy==='manual');
 
   const paidMap = paidByDebtMap();
-  const remainingFor = d => Math.max(Number(d.amount) - (paidMap[d.id]||0), 0);
+  const remainingFor = d => Math.max(Number(d.amount) - writtenOffFor(d) - (paidMap[d.id]||0), 0);
 
   const owed = totalDebtOwed();
   const paid = state.debts.reduce((s,d)=>s+(paidMap[d.id]||0),0);
@@ -1714,6 +1810,7 @@ function renderDebtTab(){
     <div class="hist-card"><div class="v">${fmt(owed)}</div><div class="l">Total owed</div></div>
     <div class="hist-card"><div class="v">${fmt(paid)}</div><div class="l">Total paid</div></div>
     <div class="hist-card"><div class="v">${fmt(remaining)}</div><div class="l">Remaining</div></div>
+    ${totalDebtWrittenOff() > 0 ? `<div class="hist-card" style="grid-column:1/-1;"><div class="v">${fmt(totalDebtWrittenOff())}</div><div class="l">Written off (cancelled, not paid)</div></div>` : ''}
   `;
 
   const active = state.debts.filter(d=>remainingFor(d)>0);
@@ -1731,7 +1828,8 @@ function renderDebtTab(){
       : state.debtStrategy==='snowball' ? 'Smallest remaining balance — clearing this first builds momentum fastest.'
       : 'Manually selected as your current focus.';
     const rem = remainingFor(focus);
-    const pct = focus.amount>0 ? Math.min((paidMap[focus.id]||0)/focus.amount,1) : 0;
+    const focusEff = Math.max(Number(focus.amount) - writtenOffFor(focus), 0);
+    const pct = focusEff>0 ? Math.min((paidMap[focus.id]||0)/focusEff,1) : 0;
     focusWrap.innerHTML = `
       <div class="debt-focus-card">
         <div class="focus-badge">CURRENTLY SERVICING</div>
@@ -1742,7 +1840,7 @@ function renderDebtTab(){
             <div class="debt-reason">${escapeHtml(focus.reason)||'—'}</div>
           </div>
         </div>
-        <div class="debt-foot" style="margin-top:10px;"><span>Owed: ${fmt(focus.amount)}</span></div>
+        <div class="debt-foot" style="margin-top:10px;"><span>Owed: ${fmt(focusEff)}</span></div>
         <p style="font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px;">${why}</p>
         <button class="btn btn-teal" style="margin:0;" data-debtpay="${focus.id}">Log a payment</button>
       </div>
@@ -1764,7 +1862,7 @@ function renderDebtTab(){
     orderedDebts.forEach(debt=>{
       const grp = debtGroups.get(debtGroupKey(debt.creditor));
       if(grp.length > 1 && grp[0].id === debt.id){
-        const gOwed = grp.reduce((sum,d)=>sum + (Number(d.amount)||0), 0);
+        const gOwed = grp.reduce((sum,d)=>sum + (Number(d.amount)||0) - writtenOffFor(d), 0);
         const gPaid = grp.reduce((sum,d)=>sum + (paidMap[d.id]||0), 0);
         const gDiv = document.createElement('div');
         gDiv.className = 'debt-group';
@@ -1774,7 +1872,9 @@ function renderDebtTab(){
         listWrap.appendChild(gDiv);
       }
       const rem = remainingFor(debt);
-      const pct = debt.amount>0 ? Math.min((paidMap[debt.id]||0)/debt.amount,1) : 0;
+      const wo = writtenOffFor(debt);
+      const eff = Math.max(Number(debt.amount) - wo, 0);
+      const pct = eff>0 ? Math.min((paidMap[debt.id]||0)/eff,1) : (wo>0 ? 1 : 0);
       const isFocused = focus && focus.id===debt.id;
       const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
       const div = document.createElement('div');
@@ -1782,14 +1882,17 @@ function renderDebtTab(){
       div.innerHTML = `
         <div class="debt-top">
           <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(debt.creditor)}${isFocused ? ' <span style="color:var(--gold);font-size:10px;">★ FOCUS</span>' : ''}</div>
-          <div class="debt-amt">${rem<=0 ? '✅ Cleared' : fmt(rem)+' left'}</div>
+          <div class="debt-amt">${rem<=0 ? (wo>0 ? '🧾 Settled' : '✅ Cleared') : fmt(rem)+' left'}</div>
         </div>
         <div class="debt-reason">${escapeHtml(debt.reason)||'—'}${debt.interestRate ? ' · '+debt.interestRate+'%/yr' : ''}</div>
+        ${wo>0 ? `<div class="debt-wo">Written off ${fmt(wo)}${debt.writtenOffDate ? ' on '+escapeHtml(histDateLabel(debt.writtenOffDate)) : ''}</div>` : ''}
         <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-        <div class="debt-foot"><span>${Math.round(pct*100)}% paid</span><span>Owed: ${fmt(debt.amount)}</span></div>
+        <div class="debt-foot"><span>${Math.round(pct*100)}% paid</span><span>Owed: ${fmt(eff)}${wo>0 ? ' (of '+fmt(debt.amount)+')' : ''}</span></div>
         <div class="debt-actions">
           ${rem>0 ? `<button class="debt-btn-pay" data-pay="${debt.id}">Log payment</button>` : ''}
           <button class="debt-btn-edit" data-editdebt="${debt.id}">Edit</button>
+          ${rem>0 ? `<button class="debt-btn-edit" data-writeoff="debt:${debt.id}">Write off</button>` : ''}
+          ${wo>0 ? `<button class="debt-btn-edit" data-unwriteoff="debt:${debt.id}">Undo write-off</button>` : ''}
           ${state.debtStrategy==='manual' && rem>0 ? `<button class="debt-btn-focus" data-focus="${debt.id}">${isFocused?'Focused':'Set as focus'}</button>` : ''}
           <button class="debt-btn-adjust" data-adjustdebt="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Adjust for a payment made previously" title="Log a payment from a past cycle">✎</button>
           <button class="debt-btn-del" data-del="${debt.id}" data-name="${escapeHtml(debt.creditor)}" aria-label="Delete debt">🗑</button>
@@ -1851,20 +1954,25 @@ function renderLoanTab(){
   listWrap.innerHTML = '';
   state.loans.forEach(loan=>{
     const rem = remainingForLoan(loan);
-    const pct = loan.amount>0 ? Math.min(paidForLoan(loan.id)/loan.amount,1) : 0;
+    const lwo = writtenOffFor(loan);
+    const leff = Math.max(Number(loan.amount) - lwo, 0);
+    const pct = leff>0 ? Math.min(paidForLoan(loan.id)/leff,1) : (lwo>0 ? 1 : 0);
     const lightColor = rem<=0 ? 'var(--teal)' : pct>0 ? 'var(--amber)' : 'var(--muted-2)';
     const div = document.createElement('div');
     div.className = 'debt-card';
     div.innerHTML = `
       <div class="debt-top">
         <div class="debt-name"><span class="status-light" style="background:${lightColor};box-shadow:0 0 6px ${lightColor};"></span>${escapeHtml(loan.borrower)}</div>
-        <div class="debt-amt">${rem<=0 ? '✅ Repaid' : fmt(rem)+' left'}</div>
+        <div class="debt-amt">${rem<=0 ? (lwo>0 ? '🧾 Settled' : '✅ Repaid') : fmt(rem)+' left'}</div>
       </div>
       <div class="debt-reason">${escapeHtml(loan.reason)||'—'}</div>
+      ${lwo>0 ? `<div class="debt-wo">Written off ${fmt(lwo)}${loan.writtenOffDate ? ' on '+escapeHtml(histDateLabel(loan.writtenOffDate)) : ''}</div>` : ''}
       <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
-      <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(loan.amount)}</span></div>
+      <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(leff)}${lwo>0 ? ' (of '+fmt(loan.amount)+')' : ''}</span></div>
       <div class="debt-actions">
         ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
+        ${rem>0 ? `<button class="debt-btn-edit" data-writeoff="loan:${loan.id}">Write off</button>` : ''}
+        ${lwo>0 ? `<button class="debt-btn-edit" data-unwriteoff="loan:${loan.id}">Undo write-off</button>` : ''}
         <button class="debt-btn-adjust" data-adjustloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Adjust for a repayment made previously" title="Log a repayment from a past cycle">✎</button>
         <button class="debt-btn-del" data-delloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Delete loan">🗑</button>
       </div>
@@ -2156,7 +2264,7 @@ function openPayHistory(kind, id){
   const untracked = Math.round((paidTotal - itemised) * 100) / 100;
   document.getElementById('payHistTitle').textContent = (isDebt ? 'Payments — ' : 'Repayments — ') + name;
   document.getElementById('payHistSummary').textContent =
-    (isDebt ? 'Paid ' : 'Repaid ') + fmt(paidTotal) + ' of ' + fmt(item.amount) + (isDebt ? ' owed' : ' lent') +
+    (isDebt ? 'Paid ' : 'Repaid ') + fmt(paidTotal) + ' of ' + fmt(item.amount) + (isDebt ? ' owed' : ' lent') + (writtenOffFor(item) > 0 ? ' · ' + fmt(writtenOffFor(item)) + ' written off' : '') +
     ' · ' + recs.length + (recs.length === 1 ? ' entry' : ' entries');
   payHistRecs = recs; payHistKind = kind; payHistItemId = id;
   const list = document.getElementById('payHistList');
@@ -2267,11 +2375,66 @@ document.getElementById('debtEditSaveBtn').addEventListener('click', ()=>{
   d.creditor = creditor;
   d.reason = document.getElementById('debtEditReason').value.trim();
   d.amount = amount;
+  if(writtenOffFor(d) > amount) d.writtenOff = amount;
   d.interestRate = Number(document.getElementById('debtEditInterest').value) || 0;
   queueLoanDebtOp('updateDebt', { debt: { id: d.id, creditor: d.creditor, reason: d.reason, amount: d.amount, interestRate: d.interestRate } });
   saveState(); renderAll();
   closeSheetEl(debtEditSheet); activeSheet = null; debtEditId = null;
   showToast('Debt updated');
+});
+
+
+// ---- write off / undo a write-off (debts you owe and loans you made) ----
+const writeOffSheet = document.getElementById('writeOffSheet');
+let writeOffCtx = null;
+function openWriteOffSheet(kind, id){
+  const item = kind === 'debt' ? debtById(id) : loanById(id); if(!item) return;
+  const rem = kind === 'debt' ? remainingForDebt(item) : remainingForLoan(item);
+  if(rem <= 0) return;
+  writeOffCtx = { kind, id };
+  const who = kind === 'debt' ? item.creditor : item.borrower;
+  document.getElementById('writeOffTitle').textContent = (kind === 'debt' ? 'Write off debt — ' : 'Write off loan — ') + who;
+  document.getElementById('writeOffNote').textContent = kind === 'debt'
+    ? 'Use this when ' + who + ' has forgiven or cancelled what you still owe. No money moves: your balance and spending stay exactly as they are, the payments you made stay on record, and the cancelled part is simply no longer owed. You can undo it later.'
+    : 'Use this when you choose to forgive what ' + who + ' still owes you, or accept you won\'t get it back. Nothing is added to your income or balance, repayments you already received stay on record, and the forgiven part is simply no longer expected. You can undo it later.';
+  document.getElementById('writeOffAmount').value = Math.round(rem);
+  document.getElementById('writeOffAmount').max = Math.round(rem);
+  document.getElementById('writeOffRemainingHint').textContent = fmt(rem) + ' is still outstanding. Enter less to write off only part of it.';
+  document.getElementById('writeOffDate').value = toDateInput(new Date());
+  activeSheet = writeOffSheet; openSheetEl(writeOffSheet);
+}
+function closeWriteOffSheet(){ closeSheetEl(writeOffSheet); activeSheet = null; writeOffCtx = null; }
+document.getElementById('writeOffCancelBtn').addEventListener('click', closeWriteOffSheet);
+document.getElementById('writeOffSaveBtn').addEventListener('click', ()=>{
+  const ctx = writeOffCtx; if(!ctx) return;
+  const item = ctx.kind === 'debt' ? debtById(ctx.id) : loanById(ctx.id); if(!item) return;
+  const rem = ctx.kind === 'debt' ? remainingForDebt(item) : remainingForLoan(item);
+  const amt = Number(document.getElementById('writeOffAmount').value);
+  if(!(amt > 0)){ showToast('Enter an amount above zero'); return; }
+  if(amt > rem + 0.5){ showToast('That\'s more than what\'s outstanding (' + fmt(rem) + ')'); return; }
+  const date = document.getElementById('writeOffDate').value || toDateInput(new Date());
+  item.writtenOff = writtenOffFor(item) + Math.min(amt, rem);
+  item.writtenOffDate = date;
+  // The new TOTAL written off is sent (not "add this much"), so a retry can't write off twice.
+  queueLoanDebtOp('writeOff', { kind: ctx.kind, id: ctx.id, total: item.writtenOff, date });
+  saveState(); renderAll();
+  closeWriteOffSheet();
+  showToast('Written off ' + fmt(Math.min(amt, rem)));
+});
+async function undoWriteOff(kind, id){
+  const item = kind === 'debt' ? debtById(id) : loanById(id); if(!item || writtenOffFor(item) <= 0) return;
+  const ok = await askConfirm('Undo write-off?', fmt(writtenOffFor(item)) + ' will be counted as ' + (kind === 'debt' ? 'owed' : 'still owed to you') + ' again.');
+  if(!ok) return;
+  item.writtenOff = 0; item.writtenOffDate = '';
+  queueLoanDebtOp('writeOff', { kind, id, total: 0, date: '' });
+  saveState(); renderAll();
+  showToast('Write-off undone');
+}
+document.addEventListener('click', (e)=>{
+  const w = e.target.closest && e.target.closest('[data-writeoff]');
+  if(w){ const [k, id] = w.dataset.writeoff.split(':'); openWriteOffSheet(k, id); return; }
+  const u = e.target.closest && e.target.closest('[data-unwriteoff]');
+  if(u){ const [k, id] = u.dataset.unwriteoff.split(':'); undoWriteOff(k, id); }
 });
 
 // ---- debts owed to the same person ----
@@ -2292,6 +2455,9 @@ async function mergeDebtGroup(key){
   if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
   const acc = group.reduce((sum,d)=>sum + (Number(state.debtPaidAccumulated[d.id])||0), 0);
   target.amount = total;
+  target.writtenOff = group.reduce((sum,d)=>sum + writtenOffFor(d), 0);
+  const woDates = group.map(d=>d.writtenOffDate).filter(Boolean).sort();
+  target.writtenOffDate = woDates.length ? woDates[woDates.length-1] : '';
   if(reason) target.reason = reason;
   state.transactions.forEach(t=>{ if(sourceIds.has(t.debtId)) t.debtId = target.id; });
   (state.history||[]).forEach(h=>(h.transactions||[]).forEach(t=>{ if(sourceIds.has(t.debtId)) t.debtId = target.id; }));
@@ -2309,7 +2475,7 @@ document.getElementById('newDebtCreditor').addEventListener('input', ()=>{
   const same = key ? state.debts.filter(d=>debtGroupKey(d.creditor) === key) : [];
   if(!same.length){ hint.style.display = 'none'; return; }
   const paidMap = paidByDebtMap();
-  const left = same.reduce((sum,d)=>sum + Math.max((Number(d.amount)||0) - (paidMap[d.id]||0), 0), 0);
+  const left = same.reduce((sum,d)=>sum + Math.max((Number(d.amount)||0) - writtenOffFor(d) - (paidMap[d.id]||0), 0), 0);
   hint.textContent = 'You already owe ' + same[0].creditor + ' ' + fmt(left) + ' across ' + same.length + ' debt' + (same.length===1?'':'s') + '. This will be added as another debt under the same name — you can merge them any time.';
   hint.style.display = 'block';
 });
@@ -3040,7 +3206,7 @@ document.getElementById('extraSaveBtn').addEventListener('click', ()=>{
   document.getElementById('extraAmount').value=''; document.getElementById('extraSource').value='';
   document.getElementById('fxPreview').style.display = 'none';
   showToast(entry.fxOriginalCurrency
-    ? `Converted ${entry.fxOriginalCurrency}${entry.fxOriginalAmount} → ${fmt(entry.amount)} and added`
+    ? `Converted ${entry.fxOriginalCurrency}${symSep(entry.fxOriginalCurrency)}${entry.fxOriginalAmount} → ${fmt(entry.amount)} and added`
     : 'Extra income added — buffered into your totals');
 });
 
@@ -3672,6 +3838,13 @@ document.getElementById('downloadPdfBtn').addEventListener('click', async ()=>{
     await loadJsPdf();
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
+    // The PDF's built-in font only covers Latin-1, so symbols like ₦ ₹ ₵ zł come out
+    // as garbage — use the 3-letter currency code for those (NGN 1,000).
+    const fmt = (n)=>{
+      const sym = state.currency || '₦';
+      const out = window.fmt ? window.fmt(n) : '';
+      return /^[\u0000-\u00ff]*$/.test(sym) ? out : out.replace(sym, currencyCodeFor(sym) + ' ');
+    };
     const d = currentReportD;
     const pageW = 210;
     const marginX = 16;
@@ -3959,6 +4132,15 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
     state.savingsAccumulated[c.id] = (state.savingsAccumulated[c.id]||0) + contributed;
   });
 
+  // Debt payments logged this cycle fold into each debt's paid-so-far total,
+  // exactly as the automatic payday archive does on the server. Without this,
+  // clearing the cycle's transactions made those payments vanish from the
+  // debt's progress and its remaining balance jumped back up.
+  if(!state.debtPaidAccumulated) state.debtPaidAccumulated = {};
+  state.transactions.forEach(t=>{
+    if(t.debtId) state.debtPaidAccumulated[t.debtId] = (Number(state.debtPaidAccumulated[t.debtId])||0) + (Number(t.amount)||0);
+  });
+
   state.transactions = [];
   state.extraIncome = [];
   if(state.payType === 'wages') state.cycleStartDate = toDateInput(new Date());
@@ -4000,10 +4182,34 @@ function showLockScreen(msg){
 function hideLockScreen(){
   document.getElementById('lockScreen').style.display = 'none';
 }
-function hideLoadingScreen(){
+// Cinematic intro: the loading screen plays a short sequence (see the CSS) and
+// holds for at least INTRO_MIN_MS so it doesn't flash by, then lifts to reveal
+// the login or dashboard. Tapping it skips ahead. If the app takes longer to
+// load than the sequence, the progress shimmer just keeps going.
+const INTRO_T0 = Date.now();
+const INTRO_REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+const INTRO_MIN_MS = INTRO_REDUCED ? 600 : 2600;
+let introLeaving = false, introSkipped = false, introTimer = null;
+document.body.classList.add('intro-playing');
+setTimeout(()=>document.body.classList.remove('intro-playing'), 9000); // safety net: never leave the login hidden
+function introLeave(){
+  clearTimeout(introTimer);
   const el = document.getElementById('loadingScreen');
-  if(el) el.style.display = 'none';
+  document.body.classList.remove('intro-playing');
+  if(!el) return;
+  el.classList.add('leaving');
+  setTimeout(()=>{ el.style.display = 'none'; }, 700);
 }
+function hideLoadingScreen(){
+  if(introLeaving) return;
+  introLeaving = true;
+  const wait = introSkipped ? 0 : Math.max(0, INTRO_MIN_MS - (Date.now() - INTRO_T0));
+  introTimer = setTimeout(introLeave, wait);
+}
+document.getElementById('loadingScreen')?.addEventListener('click', ()=>{
+  introSkipped = true;
+  if(introLeaving) introLeave();
+});
 /* ============================================================
    BOT PROTECTION — Cloudflare Turnstile on signup, login and password
    reset. All three are real, unauthenticated Supabase Auth endpoints a
@@ -5023,7 +5229,7 @@ function maybeStartTour(){
     if(lock && lock.style.display === 'flex') return;
     const isNew = !(state.transactions||[]).length && !(state.history||[]).length;
     if(isNew) startTour();
-  }, 900);
+  }, Math.max(900, INTRO_MIN_MS + 900 - (Date.now() - INTRO_T0)));
 }
 
 /* ============================================================
