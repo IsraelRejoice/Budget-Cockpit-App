@@ -660,13 +660,64 @@ body{min-height:100vh; padding-bottom:92px;}
 .lock-input:focus{outline:none;border-color:var(--gold);}
 .lock-error{margin-top:12px;font-size:12px;color:var(--red);min-height:16px;}
 
-/* Loading screen */
-.loading-screen{position:fixed;inset:0;z-index:99;background:var(--bg);display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:14px;}
-.loading-spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--line);
-  border-top-color:var(--gold);animation:spin .8s linear infinite;}
-@keyframes spin{ to{ transform:rotate(360deg); } }
-.loading-text{font-size:12.5px;color:var(--muted);}
+/* Loading screen — cinematic intro: a gauge draws itself and its needle sweeps,
+   the name rises in letter by letter, then the whole scene pushes toward you
+   and fades to reveal the login (or your dashboard). Pure CSS/SVG, no assets. */
+.loading-screen{position:fixed;inset:0;z-index:101;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 30%, color-mix(in srgb,var(--panel) 85%,var(--bg)) 0%, var(--bg) 70%);
+  transition:opacity .65s ease, transform .65s cubic-bezier(.4,0,.2,1), filter .65s ease;}
+.loading-screen.leaving{opacity:0;transform:scale(1.12);filter:blur(7px);pointer-events:none;}
+.intro-glow{position:absolute;width:140vmax;height:140vmax;left:50%;top:42%;transform:translate(-50%,-50%);pointer-events:none;
+  background:radial-gradient(closest-side, color-mix(in srgb,var(--gold) 16%,transparent), transparent 62%);
+  animation:introGlow 6s ease-in-out infinite alternate;}
+@keyframes introGlow{from{transform:translate(-50%,-50%) scale(.8);opacity:.55;}to{transform:translate(-50%,-50%) scale(1.05);opacity:1;}}
+.intro-stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:16px;width:min(86vw,320px);}
+.intro-dial{width:min(62vw,230px);height:auto;overflow:visible;filter:drop-shadow(0 0 18px color-mix(in srgb,var(--gold) 28%,transparent));}
+.dial-track{fill:none;stroke:var(--line);stroke-width:5;stroke-linecap:round;}
+.dial-arc{fill:none;stroke:url(#dialGrad);stroke-width:5;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:100;animation:dialDraw 1.3s .15s cubic-bezier(.5,0,.2,1) forwards;}
+@keyframes dialDraw{to{stroke-dashoffset:0;}}
+.dial-ticks line{stroke:var(--muted-2);stroke-width:1.6;stroke-linecap:round;opacity:0;animation:tickIn .35s ease-out forwards;animation-delay:calc(.35s + var(--i) * 55ms);}
+.dial-ticks line.big{stroke:var(--muted);stroke-width:2.4;}
+@keyframes tickIn{from{opacity:0;}to{opacity:1;}}
+.dial-needle{transform-origin:100px 100px;transform:rotate(-120deg);animation:needleSweep 1.7s .5s cubic-bezier(.3,1.2,.4,1) forwards;}
+.dial-needle line{stroke:var(--gold);stroke-width:3.2;stroke-linecap:round;}
+.dial-needle circle{fill:var(--gold);}
+.dial-hub{fill:var(--bg);}
+@keyframes needleSweep{0%{transform:rotate(-120deg);}55%{transform:rotate(84deg);}75%{transform:rotate(52deg);}100%{transform:rotate(64deg);}}
+.intro-title{display:flex;justify-content:center;flex-wrap:wrap;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:22px;letter-spacing:.14em;color:var(--text);}
+.il{display:inline-block;opacity:0;transform:translateY(14px);filter:blur(6px);animation:letterIn .6s cubic-bezier(.2,.8,.2,1) forwards;animation-delay:calc(1s + var(--i) * 45ms);}
+.il.sp{width:.5em;}
+@keyframes letterIn{to{opacity:1;transform:none;filter:none;}}
+.intro-tag{font-size:12.5px;color:var(--muted);letter-spacing:.06em;opacity:0;animation:tagIn .8s 1.9s ease-out forwards;}
+@keyframes tagIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+.intro-bar{width:160px;height:3px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px;opacity:0;animation:tagIn .5s 1.2s ease-out forwards;}
+.intro-bar span{display:block;height:100%;width:40%;border-radius:3px;background:linear-gradient(90deg,var(--teal),var(--gold));animation:introBar 1.5s ease-in-out infinite;}
+@keyframes introBar{0%{transform:translateX(-110%);}100%{transform:translateX(280%);}}
+.intro-status{position:relative;height:16px;width:100%;text-align:center;font-size:11.5px;color:var(--muted-2);}
+.intro-status span{position:absolute;inset:0;opacity:0;animation:statusCycle 6s infinite;}
+.intro-status span:nth-child(2){animation-delay:2s;}
+.intro-status span:nth-child(3){animation-delay:4s;}
+@keyframes statusCycle{0%,4%{opacity:0;transform:translateY(5px);}10%,28%{opacity:1;transform:none;}34%,100%{opacity:0;}}
+.intro-skip{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));font-size:11px;color:var(--muted-2);letter-spacing:.08em;text-transform:uppercase;opacity:0;animation:tagIn .6s 1.4s ease-out forwards;}
+/* the login card rises in once the intro lifts */
+body.intro-playing .lock-box{opacity:0;}
+body:not(.intro-playing) .lock-box > *{animation:lockRise .7s cubic-bezier(.2,.8,.2,1) both;}
+body:not(.intro-playing) .lock-box > *:nth-child(2){animation-delay:.06s;}
+body:not(.intro-playing) .lock-box > *:nth-child(3){animation-delay:.12s;}
+body:not(.intro-playing) .lock-box > *:nth-child(4){animation-delay:.18s;}
+body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
+@keyframes lockRise{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion: reduce){
+  .loading-screen{transition:opacity .3s ease;}
+  .loading-screen.leaving{transform:none;filter:none;}
+  .intro-glow,.intro-bar span,.intro-status span{animation:none;}
+  .dial-arc{animation:none;stroke-dashoffset:0;}
+  .dial-ticks line,.il,.intro-tag,.intro-bar,.intro-skip{animation:none;opacity:1;transform:none;filter:none;}
+  .dial-needle{animation:none;transform:rotate(64deg);}
+  .intro-status span:first-child{opacity:1;}
+  body:not(.intro-playing) .lock-box > *{animation:none;}
+}
+.debt-wo{font-size:11.5px;color:var(--amber);margin:2px 0 8px;}
 /* Hover states — desktop/web only, never affects touch devices */
 @media (hover:hover) and (pointer:fine){
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
@@ -755,9 +806,28 @@ body{min-height:100vh; padding-bottom:92px;}
 </div>
 
 
-<div class="loading-screen" id="loadingScreen">
-  <div class="loading-spinner"></div>
-  <div class="loading-text">Loading your budget…</div>
+<div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Budget Cockpit">
+  <div class="intro-glow"></div>
+  <div class="intro-stage">
+    <svg class="intro-dial" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <linearGradient id="dialGrad" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" style="stop-color:var(--teal)"/>
+          <stop offset="100%" style="stop-color:var(--gold)"/>
+        </linearGradient>
+      </defs>
+      <path class="dial-track" d="M27.25 142 A84 84 0 1 1 172.75 142"/>
+      <path class="dial-arc" pathLength="100" d="M27.25 142 A84 84 0 1 1 172.75 142"/>
+      <g class="dial-ticks"><line style="--i:0" x1="41.1" y1="134.0" x2="32.5" y2="139.0" class="big"/><line style="--i:1" x1="29.1" y1="112.5" x2="23.2" y2="113.5"/><line style="--i:2" x1="29.1" y1="87.5" x2="23.2" y2="86.5"/><line style="--i:3" x1="41.1" y1="66.0" x2="32.5" y2="61.0" class="big"/><line style="--i:4" x1="53.7" y1="44.8" x2="49.9" y2="40.2"/><line style="--i:5" x1="75.4" y1="32.3" x2="73.3" y2="26.7"/><line style="--i:6" x1="100.0" y1="32.0" x2="100.0" y2="22.0" class="big"/><line style="--i:7" x1="124.6" y1="32.3" x2="126.7" y2="26.7"/><line style="--i:8" x1="146.3" y1="44.8" x2="150.1" y2="40.2"/><line style="--i:9" x1="158.9" y1="66.0" x2="167.5" y2="61.0" class="big"/><line style="--i:10" x1="170.9" y1="87.5" x2="176.8" y2="86.5"/><line style="--i:11" x1="170.9" y1="112.5" x2="176.8" y2="113.5"/><line style="--i:12" x1="158.9" y1="134.0" x2="167.5" y2="139.0" class="big"/></g>
+      <g class="dial-needle"><line x1="100" y1="100" x2="100" y2="40"/><circle cx="100" cy="100" r="7"/></g>
+      <circle class="dial-hub" cx="100" cy="100" r="2.5"/>
+    </svg>
+    <div class="intro-title" aria-hidden="true"><span class="il" style="--i:0">B</span><span class="il" style="--i:1">U</span><span class="il" style="--i:2">D</span><span class="il" style="--i:3">G</span><span class="il" style="--i:4">E</span><span class="il" style="--i:5">T</span><span class="il sp" style="--i:6">&nbsp;</span><span class="il" style="--i:7">C</span><span class="il" style="--i:8">O</span><span class="il" style="--i:9">C</span><span class="il" style="--i:10">K</span><span class="il" style="--i:11">P</span><span class="il" style="--i:12">I</span><span class="il" style="--i:13">T</span></div>
+    <div class="intro-tag">Your money, in full view</div>
+    <div class="intro-bar"><span></span></div>
+    <div class="intro-status"><span>Securing your session…</span><span>Syncing your numbers…</span><span>Almost there…</span></div>
+  </div>
+  <div class="intro-skip">Tap to skip</div>
 </div>
 
 
@@ -1003,51 +1073,123 @@ body{min-height:100vh; padding-bottom:92px;}
     <div style="margin:0 20px 14px;"><button class="btn btn-primary" id="tourReplayGuideBtn" type="button">▶ Take the app tour</button></div>
 
     <div class="guide-block">
-      <h3>How this app works</h3>
+      <h3>Getting started</h3>
       <div class="faq-item"><div class="faq-q">How do I get started?</div>
-        <div class="faq-a">Go to Settings, enter your income, your payday (day of month), then set a budget for each category. Everything else updates automatically as you log expenses.</div></div>
-      <div class="faq-item"><div class="faq-q">Why does my payday move around?</div>
-        <div class="faq-a">Your pay date is set to a fixed day of the month (default 25th). If that date falls on a Saturday or Sunday, the cycle automatically shifts to the preceding Friday — matching how most salaries are actually paid.</div></div>
-      <div class="faq-item"><div class="faq-q">Why aren't Savings/Emergency Fund counted as spending?</div>
-        <div class="faq-a">Money you deliberately move into savings isn't an expense — it's still yours, just earmarked. It's excluded from "Spent" and tracked separately on the Savings tab, where it accumulates toward a goal over time instead of resetting each cycle.</div></div>
-      <div class="faq-item"><div class="faq-q">What's "Safe to spend per day"?</div>
-        <div class="faq-a">(Remaining budget) ÷ (days left until payday). It's a pace check — if you spend at or below this amount each remaining day, you'll land within budget by payday. Spending more than this on a given day just means tighter days ahead, not an emergency.</div></div>
-      <div class="faq-item"><div class="faq-q">What happens when I archive a cycle?</div>
-        <div class="faq-a">Totals are saved to History, savings contributions fold into your lifetime accumulated total, a report is generated, and transactions/extra income reset. Category budgets and goals stay the same.</div></div>
-      <div class="faq-item"><div class="faq-q">Can I share this app with someone else?</div>
-        <div class="faq-a">If you send them your HTML file as-is, they'd be reading and writing to your same database — their data would mix into yours, not stay separate, and you would not get a distinct report for them. For someone else to use this properly, they need their own copy: their own Supabase project, their own Edge Function deployment, and their own project URL and key pasted into their own copy of this file.</div></div>
+        <div class="faq-a">Create your account with an email and password (a quick “verify you’re human” check may appear). A short tour then points out the main buttons — you can replay it any time with the button at the top of this Guide tab. After that, open Settings and: pick your currency, choose how you’re paid (salary or wages), enter your income, and set a budget for each category. Everything else updates automatically as you log expenses. Each new account starts with 16 ready-made categories you can rename, re-budget, add to or remove.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the difference between “Salary” and “Wages”?</div>
+        <div class="faq-a"><b>Salary</b> means a fixed payday each month (you choose the day, 1–28; the default is the 25th). Your cycle runs from one payday to the next, and the Dashboard shows the days left and your safe-to-spend-per-day. <b>Wages</b> means no fixed schedule: your cycle starts when you start it and runs until you end it yourself with “Archive this cycle &amp; start fresh” in Settings. Nothing is archived automatically, and because there’s no end date to measure against, the Dashboard shows “Cycle day” instead of a countdown, pace badge or per-day allowance. You can switch in Settings at any time; switching to Wages starts a new open-ended cycle from today.</div></div>
+      <div class="faq-item"><div class="faq-q">Why does my payday move around? (Salary)</div>
+        <div class="faq-a">Your payday is a fixed day of the month. If it lands on a Saturday or Sunday, the cycle shifts to the Friday before, which is when most salaries are actually paid.</div></div>
+      <div class="faq-item"><div class="faq-q">Which currencies can I use, and what happens if I change mine?</div>
+        <div class="faq-a">Settings → Currency offers about 85 currencies, including Naira, US, Canadian and Australian dollars, pound, euro, rand, cedi and many more across Africa, the Americas, Europe, the Middle East and Asia. Changing it changes the symbol shown on every amount — it does <b>not</b> convert numbers you’ve already entered. In PDF reports, symbols the PDF font can’t draw (such as ₦) are printed as the 3-letter code (NGN) instead.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I use the app on my phone like a normal app?</div>
+        <div class="faq-a">Yes. Open it in your phone’s browser and choose “Add to Home Screen” (or “Install app”). It then opens full-screen like any other app.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Logging your money</h3>
+      <div class="faq-item"><div class="faq-q">How do I log an expense?</div>
+        <div class="faq-a">Tap the <b>+</b> button, enter the amount, pick a category, and add a note, a payment method and a date if you like. The date defaults to today. Tick “Repeats every cycle” to have it logged again automatically at the start of each new cycle (rent, subscriptions).</div></div>
       <div class="faq-item"><div class="faq-q">How do I edit or delete an expense I logged wrong?</div>
-        <div class="faq-a">Tap any transaction row to edit it — the amount, category, method, description, and date can all be changed, and Save updates it in place instead of creating a duplicate. On mobile you can also swipe a row left to reveal quick Edit and Delete buttons. The ✕ button next to a transaction deletes it directly.</div></div>
+        <div class="faq-a">Tap any transaction to edit it — amount, category, method, note and date can all be changed, and Save updates it in place instead of creating a duplicate. On a phone you can also swipe a row left for quick Edit and Delete buttons, and the ✕ button deletes it directly.</div></div>
       <div class="faq-item"><div class="faq-q">What are payment methods for, and do I have to use them?</div>
-        <div class="faq-a">Optional. Tagging an expense as Cash, Card, USSD, Mobile Wallet, or Bank Transfer doesn't change any calculations — it's just there so your transaction list (and any export) shows how money left your account, useful for spotting patterns like "I overspend when paying by card."</div></div>
-      <div class="faq-item"><div class="faq-q">I received income in a different currency (e.g. dollars) — how does that get added to my Naira total?</div>
-        <div class="faq-a">When logging Extra Income, pick the currency you actually received it in. The app fetches a live exchange rate at that moment (via the Frankfurter rate API, which sources European Central Bank reference rates) and converts it to your home currency automatically — you'll see a preview like "$50 ≈ ₦77,500 at today's rate" before saving. The original amount, currency, the exact rate used, and the date are all kept on the entry so you can see exactly how it was converted later. Only your home-currency total ever counts toward your budget — nothing is double-counted.</div></div>
+        <div class="faq-a">They’re optional. Tagging an expense as Cash, Card, USSD, Mobile Wallet or Bank Transfer doesn’t change any calculation — it just shows in your transaction list and exports so you can spot patterns such as “I overspend when paying by card”.</div></div>
+      <div class="faq-item"><div class="faq-q">How do I add extra income, including money in another currency?</div>
+        <div class="faq-a">Tap “+ Add extra income”. Pick the currency you actually received it in and the app looks up a live exchange rate (from Frankfurter, a free service that collects rates from central banks and other official sources) and shows a preview like “≈ ₦77,500 at today’s rate” before you save. The original amount, currency, rate and date are kept on the entry, and only the converted home-currency amount counts toward your budget. If the live rate can’t be fetched (no connection, or an unusual currency), enter the amount in your home currency instead.</div></div>
+      <div class="faq-item"><div class="faq-q">What does “Safe to spend per day” mean?</div>
+        <div class="faq-a">It’s (remaining budget) ÷ (days left until payday) — a pace check. Spending at or below it each remaining day lands you within budget by payday; going over on one day just means tighter days ahead, not an emergency. It only applies to Salary; Wages cycles have no end date, so it isn’t shown.</div></div>
+      <div class="faq-item"><div class="faq-q">Why aren’t Savings and Emergency Fund counted as spending?</div>
+        <div class="faq-a">Money you move into savings isn’t an expense — it’s still yours, just set aside. It’s left out of “Spent” and tracked on the Finance → Savings tab, where it builds toward a goal over time instead of resetting each cycle. When you reach a goal the bar shows 100%+ and it’s marked “Target met”; nothing else changes automatically, so you decide whether to raise the goal or redirect contributions.</div></div>
+      <div class="faq-item"><div class="faq-q">What are the green, amber and red icons on my categories?</div>
+        <div class="faq-a">They show how much of each category’s budget is used: a green tick means on track, amber means you’ve used most of it (each category has its own warning point, roughly 85–95% of its budget), and red means you’ve gone over.</div></div>
       <div class="faq-item"><div class="faq-q">How do I add or remove a category?</div>
-        <div class="faq-a">In Settings, scroll to "Add a new category" — give it a name and a group (Needs/Wants/Savings). To remove one, tap the 🗑 next to it in the category list. If it still has spending logged this cycle, you'll be warned first; the transactions themselves aren't deleted, they just show as "Uncategorized."</div></div>
-      <div class="faq-item"><div class="faq-q">What's the difference between the Debt tracker and the "Debt repayment" category?</div>
-        <div class="faq-a">The Debt repayment category is a budget line, like Rent or Food — it caps how much you plan to spend on debt this cycle. The Debt tracker (in the Finance tab) is more granular: it tracks individual creditors, how much you owe each one, and lets you log payments per-creditor. Every debt payment you log there also counts toward the Debt repayment category automatically, so the two stay in sync.</div></div>
-      <div class="faq-item"><div class="faq-q">How does the Avalanche/Snowball/Manual strategy work?</div>
-        <div class="faq-a">Avalanche automatically highlights whichever debt has the highest interest rate as your focus — mathematically saves you the most money. Snowball highlights whichever has the smallest remaining balance — clears faster and builds momentum. Manual lets you pick any debt yourself regardless of the numbers. Switching strategies doesn't change your debts, only which one is suggested as your current focus.</div></div>
-      <div class="faq-item"><div class="faq-q">What happens to a savings goal once I hit it?</div>
-        <div class="faq-a">Nothing automatic — the progress bar just shows 100%+ and the category is marked "Target met." You decide whether to raise the goal, redirect contributions elsewhere, or leave it as a maintained buffer.</div></div>
+        <div class="faq-a">In Settings, scroll to “Add a new category”, give it a name and a group (Needs, Wants or Savings). To remove one, tap the 🗑 next to it. If it has spending this cycle you’ll be warned first; the transactions aren’t deleted, they just show as “Uncategorized”.</div></div>
+      <div class="faq-item"><div class="faq-q">How do bills and recurring transactions work?</div>
+        <div class="faq-a">Settings → Bills &amp; subscriptions lets you list a bill with its due day; a reminder banner appears on the Dashboard when one is due within 5 days. Recurring transactions (ticked “Repeats every cycle” when logging) are logged again automatically when a new cycle starts, and you can stop any of them under Settings → Recurring transactions.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the eye icon at the top for?</div>
+        <div class="faq-a">Privacy mode. It hides your figures when someone is nearby; tap it again to show them.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Debts, loans &amp; write-offs</h3>
+      <div class="faq-item"><div class="faq-q">What’s the difference between the Debt tracker and the “Debt repayment” category?</div>
+        <div class="faq-a">The Debt repayment category is a budget line, like Rent or Food — it caps what you plan to spend on debt this cycle. The Debt tracker (Finance tab) is more detailed: it tracks each creditor, how much you owe and what you’ve paid. Every payment you log there also counts toward the Debt repayment category, so the two stay in sync.</div></div>
+      <div class="faq-item"><div class="faq-q">What happens when I add a debt?</div>
+        <div class="faq-a">The app asks what the borrowed money was for: <b>add it to my balance</b> (it’s recorded as income you can spend), <b>I’ve already spent it</b> (recorded as income plus a categorised expense, so the books balance), or <b>just track the debt</b> (no change to your balance — for example if someone else is holding the money).</div></div>
+      <div class="faq-item"><div class="faq-q">I owe the same person more than once (say Grandma) — how should I record it?</div>
+        <div class="faq-a">Add each as its own debt. Debts owed to the same name (capitalisation doesn’t matter) are grouped under one header showing the combined total, amount paid and amount left, while each keeps its own reason and payment history. Typing a name you already owe shows how much you owe them across how many debts. If you’d rather have a single balance, tap “Merge into one debt” on the group: amounts, reasons and every payment are combined and nothing is lost, but you’ll no longer see them split by reason. To correct a wrong amount or reason on one debt, tap its <b>Edit</b> button instead.</div></div>
+      <div class="faq-item"><div class="faq-q">I logged a debt payment twice (or wrongly). How do I fix it?</div>
+        <div class="faq-a">Tap the debt to see its payment history, then tap <b>Edit</b> beside the payment to change its amount or date, or delete it. This works for the current cycle and for archived cycles — for an archived one, that cycle’s totals and the debt’s paid-so-far are corrected too, so your balance stays right.</div></div>
+      <div class="faq-item"><div class="faq-q">What does “Write off” do?</div>
+        <div class="faq-a">A write-off cancels some or all of what’s left without any money moving. Use it on a debt when the person you owe forgives or cancels it; use it on a loan when you choose to forgive what someone owes you or accept you won’t get it back. The cancelled part stops counting as owed, your balance and spending don’t change, nothing is added to your income, and the payments already logged stay on record. The card shows the written-off amount and date. You can write off part of the balance, and “Undo write-off” puts it back.</div></div>
+      <div class="faq-item"><div class="faq-q">How do loans I’ve made to other people (Lent Out) work?</div>
+        <div class="faq-a">Add a loan with who it’s to, why and how much. When they repay, tap “Log repayment”: getting your own money back isn’t income, so only anything repaid <i>beyond</i> the amount lent is added to your extra income. Tap a loan to see its repayment history. The ✎ button records a repayment you received in an earlier cycle that was never logged.</div></div>
+      <div class="faq-item"><div class="faq-q">How does the Avalanche / Snowball / Manual strategy work?</div>
+        <div class="faq-a">Avalanche highlights the debt with the highest interest rate as your focus — it saves the most money. Snowball highlights the smallest remaining balance — it clears debts fastest and builds momentum. Manual lets you pick any debt yourself. Switching strategy doesn’t change your debts, only which one is suggested as your current focus. Settled and written-off debts are never suggested.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Cycles, reports &amp; history</h3>
+      <div class="faq-item"><div class="faq-q">What happens when a cycle is archived?</div>
+        <div class="faq-a">The cycle’s totals are saved to History, savings contributions fold into your lifetime savings totals, debt payments fold into each debt’s paid-so-far, a report is generated, and transactions and extra income reset for the next cycle. Category budgets and goals stay the same. You can archive manually from Settings at any time (“Archive this cycle &amp; start fresh”).</div></div>
+      <div class="faq-item"><div class="faq-q">Does the cycle roll over by itself?</div>
+        <div class="faq-a">For Salary accounts, yes: the app archives your cycle automatically at the end of payday (shortly before midnight, Nigeria time) and, if an email address is set in Settings and email delivery is set up for the app, sends you that cycle’s report. If the app was closed, opening it after payday starts the new cycle automatically, usually within a few minutes. Wages accounts never archive automatically.</div></div>
       <div class="faq-item"><div class="faq-q">Can I see a report for a cycle I already archived?</div>
-        <div class="faq-a">Yes — go to History, scroll to "Past cycles," and tap "View" on any archived cycle. It rebuilds the full report (charts included) from the transaction snapshot saved at archive time. If a cycle was archived before this feature existed, you'll see totals only, with a note explaining why.</div></div>
-      <div class="faq-item"><div class="faq-q">What's the Year-end review?</div>
-        <div class="faq-a">Also in History — pick a year and it aggregates every cycle archived in that year into one report: total income/spent/saved, a category breakdown across the whole year, and a chart of spend per cycle.</div></div>
-      <div class="faq-item"><div class="faq-q">Can I download or email my report?</div>
-        <div class="faq-a">Both. "Copy text" copies a plain-text version. "Download PDF" generates a formatted document with charts. "Email it" opens your email app with the report pre-filled, addressed to whatever email you've set in Settings — you still have to hit send yourself, since a web page can't send email on its own.</div></div>
-      <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used to train anything?</div>
-        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle's numbers (income, spending, categories) plus your question to an AI provider you've connected yourself (the key lives as a secret on your own backend, never in this page), and shows the answer back to you — nothing is stored by Anthropic or by this app beyond your own conversation history, which lives in your own backend. Whether the AI provider itself trains on the request depends on that provider's own policy — check current terms for whichever one you connect.</div></div>
-      <div class="faq-item"><div class="faq-q">Where does my AI conversation history go?</div>
-        <div class="faq-a">It's saved in your own backend along with everything else, so it persists between visits. Use the 🗑 icon in the AI assistant header to clear it.</div></div>
-      <div class="faq-item"><div class="faq-q">What's the "My own notes" box for?</div>
-        <div class="faq-a">A free-text scratchpad in the Guide tab for anything the structured features don't cover — personal rules, reminders, half-formed ideas. It autosaves a second after you stop typing.</div></div>
-      <div class="faq-item"><div class="faq-q">Does this app work offline?</div>
-        <div class="faq-a">The app shell (layout, styling) loads instantly and works offline once installed via "Add to Home Screen." Your actual data — income, transactions, reports — still needs a live connection to reach your backend, so logging expenses while fully offline won't save until you're back online.</div></div>
-      <div class="faq-item"><div class="faq-q">Light or dark mode — does it matter which I use?</div>
-        <div class="faq-a">Purely a preference, toggled from the header icon or Settings. Nothing about calculations, storage, or backend behavior changes between them.</div></div>
-      <div class="faq-item"><div class="faq-q">I got a "could not save" or "unable to reach backend" message — what do I do?</div>
-        <div class="faq-a">First check you have a working internet connection. If it persists, open YOUR_FUNCTION_URL?action=version in a browser — it should return JSON. If it doesn't, the Edge Function isn't deployed or was deployed with JWT verification left on. Also confirm SUPABASE_URL and SUPABASE_ANON_KEY in config.js match Project Settings → API exactly — a browser console error mentioning a domain like "your-project-ref.supabase.co" (rather than your real project's address) means config.js still has a placeholder value in it.</div></div>
+        <div class="faq-a">Yes. Go to History, scroll to “Past cycles” and tap View. It rebuilds the full report from the snapshot saved at archive time. Cycles archived before reports were saved show totals only. Next to each cycle there’s also a Restore button that brings an archived cycle back as the current one (needs an internet connection).</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the Year-end review?</div>
+        <div class="faq-a">Also in History: pick a year and it combines every cycle archived that year into one report — total income, spending and savings, a category breakdown, and spend per cycle.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I download, copy or email my report?</div>
+        <div class="faq-a">Yes. “Copy text” copies a plain-text version. “Download PDF” makes a formatted statement with charts. “Email it” opens your email app with the report pre-filled for the address set in Settings; you still have to press send yourself. Reports include a record-integrity section showing when entries were created and edited (edited ones are marked *), and a note that they are not official bank records.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the shareable link?</div>
+        <div class="faq-a">On a report, “Create shareable link (7 days)” makes a read-only snapshot anyone can open without logging in. It expires after 7 days, and you can revoke it sooner under Settings → Shared links.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I share my budget with someone else, or let them use the app?</div>
+        <div class="faq-a">Anyone can use the app: send them the app’s link and they create their own account, with their own private budget. There is no shared or joint budget — each account is separate. To let someone see your figures without an account, send a shareable report link.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Signing in, security &amp; privacy</h3>
+      <div class="faq-item"><div class="faq-q">Is my data private?</div>
+        <div class="faq-a">Your budget belongs to your account. Row-level security in the database keeps other people who sign up from ever seeing your categories, transactions, debts or loans, and regular use of the app never exposes one person’s data to another. As with any hosted service, the app’s operator administers the database and retains standard administrative access to the infrastructure it runs on.</div></div>
+      <div class="faq-item"><div class="faq-q">How can I sign in?</div>
+        <div class="faq-a">With your email and password, or — once you’ve set them up in Settings → Security — a 6-digit PIN or your phone’s fingerprint / face unlock. On the login screen, switch between Password, PIN and Biometrics with the tabs. Your password always works. PIN and biometrics are conveniences for getting back in on a device that already has your login saved, so a brand-new device always needs your password first.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the difference between “Lock app now” and “Sign out completely”?</div>
+        <div class="faq-a">If you’ve set a PIN or biometrics, “Lock app now” hides your data and keeps your login on this device so you can get back in with any method. “Sign out completely” ends your login on the server and clears it from the device — use it before handing your phone to someone or on a device you don’t trust. Without a PIN or biometrics, “Lock app now” signs you out. The app also locks itself after 5 minutes of inactivity.</div></div>
+      <div class="faq-item"><div class="faq-q">What if I forget my PIN or password?</div>
+        <div class="faq-a">After 5 wrong PINs, or if you tap “Forgot?” on the PIN screen, the saved login is discarded and you sign in with your password; then set a new PIN in Settings (you don’t need the old one). For a forgotten password, tap “Forgot password?” on the login screen and follow the link emailed to you.</div></div>
+      <div class="faq-item"><div class="faq-q">Why do I sometimes see a verification check when signing in?</div>
+        <div class="faq-a">It’s a quick bot check (Cloudflare Turnstile) on sign-in, sign-up and password reset that keeps automated scripts out. If it never appears, an ad or content blocker may be hiding it — allow challenges.cloudflare.com or try another browser.</div></div>
+      <div class="faq-item"><div class="faq-q">How do daily reminders work?</div>
+        <div class="faq-a">Settings → Daily reminder: switch it on, pick a time and choose push notification, email or both. If you haven’t logged anything that day by then, you get a nudge to log an expense; on days you’ve already logged something, no reminder is sent. Push needs your permission on each device (tap “Allow push notifications”); email goes to the report email address saved in Settings (so make sure one is set).</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Sync, offline &amp; multiple devices</h3>
+      <div class="faq-item"><div class="faq-q">Does the app work offline?</div>
+        <div class="faq-a">Yes. Once loaded, you can keep logging, editing and deleting expenses with no connection. Changes are saved on your device and sync automatically when you’re back online — the sync indicator at the top shows whether everything has been saved. Debts and loans you add offline are also sent once you’re connected. A few things do need a connection: your first sign-in on a device, live exchange rates, the AI assistant, creating shareable links, restoring an archived cycle and password reset.</div></div>
+      <div class="faq-item"><div class="faq-q">Can I use the same account on two devices?</div>
+        <div class="faq-a">Yes — sign in on each. If you changed things on two devices before they synced, the app keeps the new entries from both. In the rare case it has to choose between two edits to the very same entry, a copy of this device’s version is saved under Settings → Sync so you can download it and re-enter anything that looks off.</div></div>
+      <div class="faq-item"><div class="faq-q">Light or dark mode — does it matter?</div>
+        <div class="faq-a">Purely a preference, from the header icon or Settings. Nothing about calculations or storage changes.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>AI assistant &amp; notes</h3>
+      <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used for training?</div>
+        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle’s numbers (income, spending, categories, a summary of your debts) and your question to an AI service through the app’s server (currently Groq) and shows you the answer. Your conversation is saved in your account so it’s still there next time; the 🗑 icon in the assistant clears it. Whether the AI provider trains on requests depends on that provider’s own policy. The assistant runs on a shared free allowance, so it can occasionally be unavailable when many people are using it.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the “My own notes” box for?</div>
+        <div class="faq-a">A private scratchpad at the bottom of this tab for your own budgeting rules and reminders. It saves automatically a second after you stop typing.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Troubleshooting</h3>
+      <div class="faq-item"><div class="faq-q">I got “could not save” or “unable to reach” — what do I do?</div>
+        <div class="faq-a">Check your internet connection. Your changes are kept on the device and retried automatically, so nothing is lost; the sync indicator turns back to saved once they get through. If it persists, refresh the page, or sign out and back in. Settings → About shows the app version, which helps if you need to report a problem.</div></div>
+      <div class="faq-item"><div class="faq-q">I updated or fixed something but the app looks the same.</div>
+        <div class="faq-a">Close the app completely and reopen it (or refresh the page) so your device picks up the latest version. The version number is in Settings → About.</div></div>
+      <div class="faq-item"><div class="faq-q">Payday has passed but my Dashboard still shows the old cycle.</div>
+        <div class="faq-a">Salary accounts roll over automatically — opening the app after payday should start the new cycle within a few minutes. If it doesn’t, check you’re online and refresh. Wages accounts never roll over automatically: use “Archive this cycle &amp; start fresh” in Settings.</div></div>
+      <div class="faq-item"><div class="faq-q">I run my own copy of the app. What must be set up?</div>
+        <div class="faq-a">Put your Supabase project URL and anon key in <code>config.js</code> (Project Settings → API); a console error naming a domain like “your-project-ref.supabase.co” means it still holds a placeholder. Deploy the <code>api</code> Edge Function with JWT verification off (the function checks sign-in itself), run <code>schema.sql</code>, and register the scheduled jobs in <code>cron.sql</code>. Email reports, reminders and push each need their own keys set as secrets on the function.</div></div>
     </div>
 
     <div class="guide-block">
@@ -1484,6 +1626,17 @@ body{min-height:100vh; padding-bottom:92px;}
     <button class="btn btn-primary" id="debtCashSpentSaveBtn">Log expense</button>
     <button class="btn btn-ghost" id="debtCashSpentBackBtn" style="margin-top:8px;">Back</button>
   </div>
+</div>
+
+<div class="sheet" id="writeOffSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="writeOffTitle">Write off</h3>
+  <p id="writeOffNote" style="font-size:12px;color:var(--muted);margin:-6px 0 12px;line-height:1.55;"></p>
+  <div class="field"><label>Amount to write off</label><input type="number" id="writeOffAmount" min="0" step="1" inputmode="decimal"></div>
+  <p id="writeOffRemainingHint" style="font-size:11.5px;color:var(--muted);margin:-6px 0 12px;"></p>
+  <div class="field"><label>Date</label><input type="date" id="writeOffDate"></div>
+  <button class="btn btn-primary" id="writeOffSaveBtn">Write off</button>
+  <button class="btn btn-ghost" id="writeOffCancelBtn" style="margin-top:8px;">Cancel</button>
 </div>
 
 <div class="sheet" id="payEditSheet">
