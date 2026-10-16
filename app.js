@@ -80,9 +80,13 @@ function mostRecentPayday(payDay, ref){
   if(thisMonth <= ref) return thisMonth;
   return paydayForMonth(ref.getFullYear(), ref.getMonth()-1, payDay);
 }
+// A brand-new account hasn't told us how it's paid, so no payday is assumed:
+// until they choose, the cycle is open-ended (just "since you started").
+function payIsSet(){ return state.payConfigured !== false; }
+function openEndedCycle(){ return state.payType === 'wages' || !payIsSet(); }
 function refreshCycleDates(){
   const today = new Date(); today.setHours(0,0,0,0);
-  if(state.payType === 'wages'){
+  if(openEndedCycle()){
     // No fixed schedule: the cycle just runs from cycleStartDate until the
     // person archives it themselves — there is no "next payday" to compute.
     if(!state.cycleStartDate) state.cycleStartDate = toDateInput(today);
@@ -103,6 +107,7 @@ let state = {
   email: '',
   currency: '₦',
   paydayDay: 25,
+  payConfigured: true,    // false for a brand-new account until they choose how they're paid
   payType: 'salary',      // 'salary' (fixed monthly payday) | 'wages' (no fixed schedule — manual cycles)
   cycleStartDate: '',     // wages only: when the current open-ended cycle began
   lastPayDate: '',
@@ -246,7 +251,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.13.0';
+const APP_VERSION = '1.14.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -532,6 +537,7 @@ async function loadState(){
   if(!state.aiHistory) state.aiHistory = [];
   if(state.personalNotes == null) state.personalNotes = '';
   if(state.lastArchivedPayday == null) state.lastArchivedPayday = '';
+  if(state.payConfigured == null) state.payConfigured = true;
   if(state.payType !== 'wages') state.payType = 'salary';
   if(state.cycleStartDate == null) state.cycleStartDate = '';
   if(state.reminderEnabled == null) state.reminderEnabled = false;
@@ -557,6 +563,7 @@ async function loadState(){
   if(isDirty) trySyncNow(); // push anything queued from an earlier offline session
   flushLoanDebtOps(); // same idea, for any loan/debt add/delete that didn't reach the backend yet
   maybeStartTour();
+  maybeShowLotusHint();
 }
 
 // Loans and Debts are persisted via small atomic add/delete calls (see
@@ -867,7 +874,7 @@ function daysBetween(a,b){ return Math.round((b-a)/86400000); }
 function cyclePace(){
   const last = new Date(state.lastPayDate+'T00:00:00');
   const now = new Date(); now.setHours(0,0,0,0);
-  if(state.payType === 'wages'){
+  if(openEndedCycle()){
     // Open-ended cycle: there's no target end date, so no "days left" or
     // pace-vs-budget percentage — just how many days it's been running.
     const elapsed = Math.max(daysBetween(last, now), 0);
@@ -994,13 +1001,21 @@ function formatPaydayFull(dateStr){
   return weekday + ', ' + day + suffix + ' ' + month;
 }
 function updatePaydayCard(){
+  // Until they've said how they're paid, show a setup prompt instead of a
+  // payday countdown built on a date they never chose.
+  const paySet = payIsSet();
+  const paydayCard = document.querySelector('.payday-card');
+  const setupCard = document.getElementById('paySetupCard');
+  if(paydayCard) paydayCard.style.display = paySet ? '' : 'none';
+  if(setupCard) setupCard.style.display = paySet ? 'none' : '';
+  if(!paySet) return;
   document.getElementById('lastPaydayVal').textContent = formatPaydayFull(state.lastPayDate);
   const cd = document.getElementById('paydayCountdown');
   const lbl = document.getElementById('lastPaydayLbl');
   const nextItem = document.getElementById('nextPaydayItem');
   const arrow = document.getElementById('paydayArrow');
 
-  if(state.payType === 'wages'){
+  if(openEndedCycle()){
     lbl.textContent = 'Cycle started';
     nextItem.style.display = 'none';
     arrow.style.display = 'none';
@@ -1236,7 +1251,7 @@ function miniDialSVG(pct, colorVar, size){
 function cycleLabelText(){
   const last = new Date(state.lastPayDate+'T00:00:00');
   const opts = {day:'numeric', month:'short'};
-  if(state.payType === 'wages'){
+  if(openEndedCycle()){
     const today = new Date(); today.setHours(0,0,0,0);
     return last.toLocaleDateString('en-GB',opts) + ' – ' + today.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
   }
@@ -1563,7 +1578,9 @@ async function renderFxStrip(){
       const res = await fetch(`https://api.frankfurter.dev/v2/rate/${code}/${home}`);
       if(!res.ok) throw new Error('rate fetch failed');
       const data = await res.json();
-      return {code, rate: data.rate, date: data.date};
+      // A reply without a usable number must not be shown (it printed "NaN").
+      if(!Number.isFinite(Number(data && data.rate)) || Number(data.rate) <= 0) throw new Error('bad rate');
+      return {code, rate: Number(data.rate), date: data.date};
     }));
     const rates = {}; results.forEach(r=>{ rates[r.code]=r.rate; });
     try{ localStorage.setItem('budget-cockpit-fx-strip', JSON.stringify({date: today, home, rates})); }catch(e){}
@@ -2671,9 +2688,15 @@ function renderSettings(){
   curSel.value = state.currency || '₦';
   document.getElementById('incomeCurrentDisplay').textContent = 'Current: ' + fmt(state.income);
   document.getElementById('emailCurrentDisplay').textContent = 'Current: ' + (state.email || 'not set');
-  document.getElementById('paydayInput').value = state.paydayDay || 25;
+  document.getElementById('paydayInput').value = payIsSet() ? (state.paydayDay || 25) : '';
   const payTypeSel = document.getElementById('payTypeSelect');
-  if(payTypeSel){ payTypeSel.value = state.payType === 'wages' ? 'wages' : 'salary'; applyPayTypeUI(payTypeSel.value); }
+  if(payTypeSel){
+    const blank = payTypeSel.querySelector('option[value=""]');
+    if(!payIsSet() && !blank) payTypeSel.insertBefore(new Option('Choose how you\'re paid…', ''), payTypeSel.firstChild);
+    if(payIsSet() && blank) blank.remove();
+    payTypeSel.value = !payIsSet() ? '' : (state.payType === 'wages' ? 'wages' : 'salary');
+    applyPayTypeUI(payTypeSel.value);
+  }
   document.getElementById('cycleCurrentDisplay').textContent = 'Current cycle: ' + cycleLabelText();
   refreshReminderUI();
   refreshSyncBackupUI();
@@ -3217,13 +3240,25 @@ const aiSheet = document.getElementById('aiSheet');
 function renderAiChat(){
   const wrap = document.getElementById('aiChat');
   if(!state.aiHistory.length){
-    wrap.innerHTML = '<div class="ai-empty">Ask me anything about this cycle — e.g. "Am I overspending on transport?" or "How much more can I save?"</div>';
+    wrap.innerHTML = `<div class="ai-empty lotus-about">
+      <div class="lotus-about-title">Hi, I'm Lotus</div>
+      <p>I'm your budgeting assistant. Ask me in plain language and I'll answer using your own numbers for this cycle.</p>
+      <div class="lotus-cols">
+        <div><b>Good for</b><ul>
+          <li>Where your money is going</li><li>Where you can cut back</li><li>Whether you're on track</li><li>Ideas to save or clear debt</li></ul></div>
+        <div><b>Good to know</b><ul>
+          <li>I read this cycle's summary, debts and bills — not every transaction or past cycles</li>
+          <li>I can't change or log anything for you</li>
+          <li>Guidance, not licensed financial advice</li>
+          <li>Free shared allowance — if I'm busy, try again shortly</li></ul></div>
+      </div></div>`;
   } else {
     wrap.innerHTML = '';
     state.aiHistory.forEach(msg=>{
       const bubble = document.createElement('div');
       bubble.className = 'ai-bubble ' + msg.role + (msg.error ? ' error' : '');
-      bubble.textContent = msg.text;
+      if(msg.role !== 'user'){ const who = document.createElement('span'); who.className = 'ai-who'; who.textContent = 'Lotus'; bubble.appendChild(who); }
+      bubble.appendChild(document.createTextNode(msg.text));
       wrap.appendChild(bubble);
     });
     wrap.scrollTop = wrap.scrollHeight;
@@ -3256,11 +3291,39 @@ function renderAiChips(){
     });
   });
 }
+const LOTUS_OPENED_KEY = 'budget-cockpit-lotus-opened';
+const LOTUS_HINT_KEY = 'budget-cockpit-lotus-hint-count';
+function lotusOpenedBefore(){ try{ return !!localStorage.getItem(LOTUS_OPENED_KEY); }catch(e){ return true; } }
+function hideLotusHint(){ const h = document.getElementById('lotusHint'); if(h) h.style.display = 'none'; }
+document.getElementById('lotusHintClose')?.addEventListener('click', hideLotusHint);
+if(lotusOpenedBefore()) document.getElementById('askAiFab').classList.remove('ai-fab-new');
+// A small "Hi, I'm Lotus" callout beside the button: shown a few times (never
+// again once Lotus has been opened), never while the tour is running.
+let lotusHintChecked = false;
+function maybeShowLotusHint(){
+  if(lotusHintChecked) return;
+  lotusHintChecked = true;
+  if(lotusOpenedBefore()) return;
+  let count = 0; try{ count = Number(localStorage.getItem(LOTUS_HINT_KEY)) || 0; }catch(e){}
+  if(count >= 3) return;
+  setTimeout(()=>{
+    if(lotusOpenedBefore() || tourActive) return;
+    const lock = document.getElementById('lockScreen');
+    if(lock && lock.style.display === 'flex') return;
+    const h = document.getElementById('lotusHint'); if(!h) return;
+    h.style.display = 'flex';
+    try{ localStorage.setItem(LOTUS_HINT_KEY, String(count + 1)); }catch(e){}
+    setTimeout(hideLotusHint, 9000);
+  }, Math.max(2500, INTRO_MIN_MS + 1800 - (Date.now() - INTRO_T0)));
+}
 document.getElementById('askAiFab').addEventListener('click', ()=>{
-  if(!API_URL){
-    showToast('Connect a backend first (see Settings) — the AI assistant needs one');
+  if(!navigator.onLine){
+    showToast('Lotus needs an internet connection');
     return;
   }
+  hideLotusHint();
+  try{ localStorage.setItem(LOTUS_OPENED_KEY, '1'); }catch(e){}
+  document.getElementById('askAiFab').classList.remove('ai-fab-new');
   renderAiChat();
   activeSheet = aiSheet; openSheetEl(aiSheet);
   setTimeout(()=>document.getElementById('aiQuestion').focus(), 300);
@@ -3298,7 +3361,7 @@ async function sendAiQuestion(){
     }
   }catch(e){
     const msg = state.aiHistory.find(m=>m.id===thinkingId);
-    if(msg){ msg.text = 'Could not reach the AI assistant — check your connection.'; msg.error = true; }
+    if(msg){ msg.text = 'Lotus couldn\'t be reached — check your connection and try again.'; msg.error = true; }
   }
   saveState(); renderAiChat();
 }
@@ -3366,14 +3429,28 @@ document.getElementById('personalNotesInput').addEventListener('input', (e)=>{
 /* ============================================================
    SETTINGS ACTIONS
    ============================================================ */
+document.getElementById('paySetupBtn')?.addEventListener('click', ()=>{
+  document.querySelector('.nav-btn[data-view="settings"]')?.click();
+  setTimeout(()=>{
+    const sel = document.getElementById('payTypeSelect');
+    if(!sel) return;
+    if(sel.scrollIntoView) sel.scrollIntoView({block:'center'});
+    sel.focus();
+    sel.classList.add('flash-attn');
+    setTimeout(()=>sel.classList.remove('flash-attn'), 2200);
+  }, 150);
+});
 function applyPayTypeUI(payType){
   const paydayField = document.getElementById('paydayField');
   const paydayHint = document.getElementById('paydayHint');
   const wagesHint = document.getElementById('wagesHint');
   const isWages = payType === 'wages';
-  if(paydayField) paydayField.style.display = isWages ? 'none' : '';
-  if(paydayHint) paydayHint.style.display = isWages ? 'none' : '';
+  const none = payType === '';
+  if(paydayField) paydayField.style.display = (isWages || none) ? 'none' : '';
+  if(paydayHint) paydayHint.style.display = (isWages || none) ? 'none' : '';
   if(wagesHint) wagesHint.style.display = isWages ? '' : 'none';
+  const choiceHint = document.getElementById('payChoiceHint');
+  if(choiceHint) choiceHint.style.display = none ? '' : 'none';
 }
 document.getElementById('payTypeSelect')?.addEventListener('change', (e)=>applyPayTypeUI(e.target.value));
 
@@ -3383,6 +3460,11 @@ document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
   const emailVal = document.getElementById('emailInput').value.trim();
   const currencyVal = document.getElementById('currencySelect').value;
   const payTypeVal = document.getElementById('payTypeSelect')?.value;
+  const wasSet = payIsSet();
+  if(!wasSet && payTypeVal === 'salary' && payVal === ''){
+    showToast('Enter your payday — the day of the month you\'re paid');
+    return;
+  }
 
   if(incomeVal !== '') state.income = Math.max(Number(incomeVal)||0, 0);
   if(payVal !== '') state.paydayDay = Math.min(Math.max(Number(payVal)||25, 1), 28);
@@ -3391,9 +3473,11 @@ document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
   if(payTypeVal === 'wages' || payTypeVal === 'salary'){
     const wasWages = state.payType === 'wages';
     state.payType = payTypeVal;
-    // Switching INTO wages for the first time: start the open-ended cycle
-    // from today rather than inheriting whatever the salary math last had.
-    if(payTypeVal === 'wages' && !wasWages) state.cycleStartDate = toDateInput(new Date());
+    state.payConfigured = true; // they've now told us how they're paid
+    // Switching INTO wages from salary: start the open-ended cycle from today
+    // rather than inheriting whatever the salary math last had. (A brand-new
+    // account choosing wages keeps the start date it already has.)
+    if(payTypeVal === 'wages' && wasSet && !wasWages) state.cycleStartDate = toDateInput(new Date());
   }
 
   refreshCycleDates();
@@ -3401,7 +3485,7 @@ document.getElementById('saveIncomeBtn').addEventListener('click', ()=>{
 
   document.getElementById('incomeInput').value = '';
   document.getElementById('emailInput').value = '';
-  showToast('Saved');
+  showToast(payIsSet() ? 'Saved' : 'Saved — now choose how you\'re paid to start your pay cycle');
 });
 
 document.getElementById('addCatBtn').addEventListener('click', ()=>{
@@ -4143,7 +4227,7 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
 
   state.transactions = [];
   state.extraIncome = [];
-  if(state.payType === 'wages') state.cycleStartDate = toDateInput(new Date());
+  if(openEndedCycle()) state.cycleStartDate = toDateInput(new Date());
 
   saveState(); renderAll();
 
@@ -5130,13 +5214,17 @@ if(new URLSearchParams(location.search).get('action') === 'logExpense'){
    ============================================================ */
 const TOUR_STEPS = [
   { title:'Welcome to Budget Cockpit 👋', text:"This quick tour shows what each button does. It takes about a minute — and you can skip it any time.", view:'dashboard' },
+  { sel:'#paySetupCard', when:()=>!payIsSet(), view:'dashboard', title:'First, tell us how you\'re paid', text:'Tap "Set up now" to choose salary or wages. Until you do, Budget Cockpit doesn\'t assume any payday — your pay cycle, countdown and spending pace are built from your answer.' },
   { sel:'.hero-card', view:'dashboard', title:'Your money at a glance', text:'"Available this cycle" is what you can still spend before your next payday, with a bar showing how much of your budget is used. The badge tells you if you\'re ahead of or behind pace.' },
   { sel:'#privacyToggleBtn', view:'dashboard', title:'Privacy mode', text:'Tap the eye to hide all your figures when someone\'s nearby. Tap again to show them.' },
   { sel:'#themeToggleBtn', view:'dashboard', title:'Light or dark', text:'Switch between light and dark mode to suit your eyes and your surroundings.' },
   { sel:'#syncIndicator', view:'dashboard', title:'Sync status', text:'Shows whether your latest changes are saved. You can keep logging with no internet — everything syncs automatically once you\'re back online.' },
+  { sel:'#quoteCard', view:'dashboard', title:'Money thought for today', text:'A short quote about money, success and good habits to keep you motivated. Tap ↻ New for another one — it\'s just for inspiration and never changes your numbers.' },
   { sel:'#fabAdd', view:'dashboard', title:'Log an expense', text:'This is the button you\'ll use most. Tap + to record what you spent: amount, category, and a note.' },
   { sel:'#addExtraBtn', view:'dashboard', title:'Extra income', text:'Got a bonus, gift or side-hustle money? Add it here and it\'s included in what you can spend this cycle.' },
   { sel:'#catList', view:'dashboard', title:'Spending categories', text:'Each category shows how much of its budget is used. A green tick means on track, amber means getting close, and red means you\'ve gone over.' },
+  { sel:'#askAiFab', view:'dashboard', title:'Meet Lotus, your budgeting assistant', text:'Tap Lotus any time and ask about your money in plain language: "Where can I cut back?", "Am I overspending on food?", "How am I doing this cycle?" or "What\'s the fastest way to clear my debt?". It answers using your own numbers.' },
+  { sel:'#askAiFab', view:'dashboard', title:'What Lotus can see — and its limits', text:'Lotus reads a summary of this cycle: income, spending by category, budgets, savings, debts and bills. It can\'t see individual transactions or past cycles, and it can\'t change anything or log expenses for you. It gives guidance, not licensed financial advice, and runs on a shared free allowance — if it\'s busy, try again shortly.' },
   { sel:'.nav-btn[data-view="finance"]', view:'dashboard', title:'Finance', text:'Track money you owe (Debt), savings goals, and money you\'ve lent out. Tap any debt or loan to see its payment history.' },
   { sel:'.nav-btn[data-view="history"]', view:'dashboard', title:'History', text:'Look back at past pay cycles, charts, and every transaction in the current one.' },
   { sel:'.nav-btn[data-view="guide"]', view:'dashboard', title:'Guide', text:'Answers to common questions, and this tour whenever you want to see it again.' },
@@ -5144,6 +5232,7 @@ const TOUR_STEPS = [
   { title:'You\'re all set 🎉', text:'Start by opening Settings to enter your income, then log your first expense with the + button.', view:'dashboard' },
 ];
 let tourIdx = 0, tourActive = false, tourChecked = false;
+let tourList = TOUR_STEPS; // the steps that apply right now (some only show in certain situations)
 function tourUserKey(){
   let sub = '';
   try{ sub = JSON.parse(atob((sessionToken||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub || ''; }catch(e){}
@@ -5153,7 +5242,7 @@ function tourSeen(){ try{ return !!localStorage.getItem(tourUserKey()); }catch(e
 function markTourSeen(){ try{ localStorage.setItem(tourUserKey(), '1'); }catch(e){} }
 
 function tourPlace(){
-  const step = TOUR_STEPS[tourIdx];
+  const step = tourList[tourIdx];
   const spot = document.getElementById('tourSpot');
   const card = document.getElementById('tourCard');
   const target = step.sel ? document.querySelector(step.sel) : null;
@@ -5174,18 +5263,18 @@ function tourPlace(){
   card.classList.add((r.top + r.height/2) > window.innerHeight/2 ? 'tour-top' : 'tour-bottom');
 }
 function tourShow(i){
-  tourIdx = Math.max(0, Math.min(i, TOUR_STEPS.length - 1));
-  const step = TOUR_STEPS[tourIdx];
+  tourIdx = Math.max(0, Math.min(i, tourList.length - 1));
+  const step = tourList[tourIdx];
   const navBtn = document.querySelector('.nav-btn[data-view="' + step.view + '"]');
   const activeView = document.querySelector('.nav-btn.active');
   if(navBtn && activeView !== navBtn) navBtn.click();
-  document.getElementById('tourStep').textContent = 'Step ' + (tourIdx + 1) + ' of ' + TOUR_STEPS.length;
+  document.getElementById('tourStep').textContent = 'Step ' + (tourIdx + 1) + ' of ' + tourList.length;
   document.getElementById('tourTitle').textContent = step.title;
   document.getElementById('tourText').textContent = step.text;
-  document.getElementById('tourDots').innerHTML = TOUR_STEPS.map((_,n)=>'<span class="tour-dot' + (n === tourIdx ? ' on' : '') + '"></span>').join('');
+  document.getElementById('tourDots').innerHTML = tourList.map((_,n)=>'<span class="tour-dot' + (n === tourIdx ? ' on' : '') + '"></span>').join('');
   document.getElementById('tourBackBtn').style.display = tourIdx === 0 ? 'none' : '';
-  document.getElementById('tourNextBtn').textContent = tourIdx === TOUR_STEPS.length - 1 ? 'Get started' : (tourIdx === 0 ? 'Start tour' : 'Next');
-  document.getElementById('tourSkipBtn').style.display = tourIdx === TOUR_STEPS.length - 1 ? 'none' : '';
+  document.getElementById('tourNextBtn').textContent = tourIdx === tourList.length - 1 ? 'Get started' : (tourIdx === 0 ? 'Start tour' : 'Next');
+  document.getElementById('tourSkipBtn').style.display = tourIdx === tourList.length - 1 ? 'none' : '';
   const target = step.sel ? document.querySelector(step.sel) : null;
   if(target && target.scrollIntoView) target.scrollIntoView({block:'center', behavior:'auto'});
   requestAnimationFrame(tourPlace);
@@ -5193,6 +5282,7 @@ function tourShow(i){
 function startTour(){
   if(tourActive) return;
   tourActive = true;
+  tourList = TOUR_STEPS.filter(s=>!s.when || s.when());
   ['tourBlock','tourSpot','tourCard'].forEach(id=>{ document.getElementById(id).style.display = 'block'; });
   tourShow(0);
 }
@@ -5203,7 +5293,7 @@ function endTour(){
   window.scrollTo(0, 0);
 }
 document.getElementById('tourNextBtn').addEventListener('click', ()=>{
-  if(tourIdx >= TOUR_STEPS.length - 1) endTour(); else tourShow(tourIdx + 1);
+  if(tourIdx >= tourList.length - 1) endTour(); else tourShow(tourIdx + 1);
 });
 document.getElementById('tourBackBtn').addEventListener('click', ()=>tourShow(tourIdx - 1));
 document.getElementById('tourSkipBtn').addEventListener('click', endTour);
@@ -5241,7 +5331,7 @@ function maybeStartTour(){
    ============================================================ */
 let rolloverChecking = false;
 async function maybeRolloverIfDue(){
-  if(rolloverChecking || !API_URL || !navigator.onLine || !sessionToken || isDirty || syncSuspended) return;
+  if(rolloverChecking || !API_URL || !navigator.onLine || !sessionToken || isDirty || syncSuspended || openEndedCycle()) return;
   const last = state.lastPayDate, arch = state.lastArchivedPayday || '';
   if(!last || !arch || arch >= last) return;           // nothing overdue (or baseline not set yet)
   if(toDateInput(new Date()) <= last) return;          // payday itself — the 23:59 run handles it
