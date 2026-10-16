@@ -209,6 +209,12 @@ body{min-height:100vh; padding-bottom:92px;}
   cursor:pointer;padding:4px 9px;border-radius:20px;font-weight:600;}
 .quote-text{font-family:'Playfair Display',serif;font-style:italic;font-weight:600;font-size:16px;line-height:1.45;
   color:var(--text);position:relative;z-index:1;}
+.quote-card{animation:quoteIn .9s .3s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 0 0 1px rgba(255,194,77,.22),0 10px 28px rgba(255,194,77,.08);}
+.quote-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(var(--gold),var(--teal));}
+.quote-card::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.12) 50%,transparent 60%);transform:translateX(-120%);animation:quoteShine 1.8s 1.2s ease-out 1 forwards;pointer-events:none;}
+.quote-text{font-size:17px;}
+@keyframes quoteIn{from{opacity:0;transform:translateY(14px) scale(.98);}to{opacity:1;transform:none;}}
+@keyframes quoteShine{to{transform:translateX(120%);}}
 .quote-author{font-size:11px;color:var(--gold);margin-top:10px;text-align:right;position:relative;z-index:1;
   font-weight:600;letter-spacing:.03em;}
 
@@ -413,12 +419,18 @@ body{min-height:100vh; padding-bottom:92px;}
   box-shadow:0 8px 24px rgba(255,194,77,.35);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;}
 @media (max-width:520px){.fab{right:20px;}}
 
-.ai-fab{position:fixed;bottom:78px;left:calc(50% - 240px + 20px);width:56px;height:56px;border-radius:50%;
+.ai-fab{position:fixed;bottom:78px;left:calc(50% - 240px + 20px);height:52px;padding:0 18px 0 14px;gap:8px;border-radius:28px;
   background:linear-gradient(135deg,var(--teal),#1c8f78 55%,var(--gold));border:none;color:#06231e;
   box-shadow:0 8px 24px rgba(0,229,199,.4);cursor:pointer;z-index:21;display:flex;align-items:center;justify-content:center;
-  animation:aiPulse 2.6s ease-in-out infinite;}
+  }
+.ai-fab.ai-fab-new{animation:aiPulse 2.6s ease-in-out infinite;}
 @media (max-width:520px){.ai-fab{left:20px;}}
-.ai-fab-icon{font-size:24px;animation:aiSpin 6s linear infinite;}
+.ai-fab-icon{width:26px;height:26px;flex:none;animation:lotusBloom 4s ease-in-out infinite;}
+.ai-fab-label{font-weight:700;font-size:14px;letter-spacing:.02em;}
+@keyframes lotusBloom{0%,100%{transform:scale(1) rotate(0);}50%{transform:scale(1.14) rotate(-4deg);}}
+.lotus-hint{position:fixed;bottom:140px;left:calc(50% - 240px + 20px);max-width:230px;z-index:22;display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:14px 14px 14px 4px;background:var(--panel);border:1px solid var(--teal);box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12.5px;line-height:1.45;animation:quoteIn .6s cubic-bezier(.2,.8,.2,1) both;}
+@media (max-width:520px){.lotus-hint{left:20px;}}
+.lotus-hint button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0 0 4px;}
 @keyframes aiPulse{
   0%,100%{ box-shadow:0 8px 24px rgba(0,229,199,.4), 0 0 0 0 rgba(0,229,199,.5); }
   50%{ box-shadow:0 8px 28px rgba(0,229,199,.55), 0 0 0 10px rgba(0,229,199,0); }
@@ -443,7 +455,16 @@ body{min-height:100vh; padding-bottom:92px;}
 .ai-bubble.bot{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
   border-bottom-left-radius:4px;}
 .ai-bubble.bot.error{border-color:rgba(255,59,48,.4);color:var(--red);}
-.ai-empty{text-align:center;color:var(--muted);font-size:12px;padding:30px 20px;}
+.ai-empty{color:var(--muted);font-size:12px;padding:6px 4px;}
+.lotus-about-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.lotus-about p{margin:0 0 10px;line-height:1.5;}
+.lotus-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.lotus-cols > div{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:10px 11px;}
+.lotus-cols b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);margin-bottom:4px;}
+.lotus-cols ul{margin:0;padding-left:15px;line-height:1.5;}
+.lotus-cols li{margin-bottom:3px;}
+@media (max-width:420px){.lotus-cols{grid-template-columns:1fr;}}
+.ai-who{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);margin-bottom:3px;}
 .ai-input-row{display:flex;gap:8px;align-items:center;}
 .ai-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;}
 .ai-chip{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:6px 11px;
@@ -708,6 +729,8 @@ body:not(.intro-playing) .lock-box > *:nth-child(4){animation-delay:.18s;}
 body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
 @keyframes lockRise{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}
 @media (prefers-reduced-motion: reduce){
+  .quote-card,.quote-card::after,.lotus-hint,.ai-fab-icon,.ai-fab.ai-fab-new{animation:none !important;}
+  .quote-card::after{display:none;}
   .loading-screen{transition:opacity .3s ease;}
   .loading-screen.leaving{transform:none;filter:none;}
   .intro-glow,.intro-bar span,.intro-status span{animation:none;}
@@ -718,6 +741,12 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
   body:not(.intro-playing) .lock-box > *{animation:none;}
 }
 .debt-wo{font-size:11.5px;color:var(--amber);margin:2px 0 8px;}
+.pay-setup-card{margin:14px 20px 0;padding:16px;border-radius:16px;background:var(--panel);border:1px solid var(--gold);box-shadow:0 0 0 4px color-mix(in srgb,var(--gold) 12%,transparent);}
+.pay-setup-card .ps-title{font-weight:700;font-size:15px;margin-bottom:6px;}
+.pay-setup-card .ps-text{font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:12px;}
+.pay-setup-card .btn{margin:0;}
+@keyframes flashAttn{0%,100%{box-shadow:0 0 0 0 transparent;}30%{box-shadow:0 0 0 4px var(--gold);}}
+.flash-attn{animation:flashAttn 1.1s ease-in-out 2;}
 /* Hover states — desktop/web only, never affects touch devices */
 @media (hover:hover) and (pointer:fine){
   .btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
@@ -806,6 +835,19 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
 </div>
 
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="lotusSym" viewBox="0 0 32 32">
+    <g fill="currentColor">
+      <path d="M16 3.5c3.2 4.2 4.6 8.600 0 15.800-4.600-7.200-3.200-11.600 0-15.800z"/>
+      <path opacity=".85" d="M15.200 19.600C14 12 9.600 8.600 4.500 8.800c0 6.600 4.600 10.800 10.700 10.800z"/>
+      <path opacity=".85" d="M16.800 19.600C18 12 22.400 8.600 27.500 8.800c0 6.600-4.600 10.800-10.700 10.800z"/>
+      <path opacity=".6" d="M15.400 21.400C8.600 22 3.600 20.200 1.400 15c6.200-1 11.200 1.200 14 6.400z"/>
+      <path opacity=".6" d="M16.600 21.400c6.800.6 11.800-1.200 14-6.400-6.200-1-11.200 1.200-14 6.400z"/>
+    </g>
+    <path d="M7 26c5 3 13 3 18 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".5"/>
+  </symbol>
+</svg>
+
 <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Budget Cockpit">
   <div class="intro-glow"></div>
   <div class="intro-stage">
@@ -889,6 +931,12 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
 
     <div class="fx-strip" id="fxStrip" style="display:none;"></div>
 
+    <div class="pay-setup-card" id="paySetupCard" style="display:none;">
+      <div class="ps-title">Set up how you're paid</div>
+      <div class="ps-text">Tell Budget Cockpit whether you earn a monthly salary (on a fixed payday) or wages (no fixed schedule). It then builds your pay cycle, countdown and spending pace around it — until then, no payday is assumed.</div>
+      <button class="btn btn-primary" id="paySetupBtn" type="button">Set up now</button>
+    </div>
+
     <div class="payday-card">
       <div class="payday-row">
         <div class="payday-item">
@@ -904,26 +952,26 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
       <div class="payday-countdown" id="paydayCountdown">—</div>
     </div>
 
+      <div class="quote-card" id="quoteCard">
+      <div class="quote-mark">"</div>
+      <div class="quote-eyebrow">
+        <span>✦ Money thought for today</span>
+        <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
+      </div>
+      <div class="quote-text" id="quoteText">Loading…</div>
+      <div class="quote-author" id="quoteAuthor"></div>
+    </div>
+
     <div class="badge-row" id="badgeRow" style="display:none;"></div>
     <div class="bill-reminders" id="billReminders" style="display:none;"></div>
 
     <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
 
     <button class="insights-toggle" id="insightsToggle" type="button">
-      <span>✦ Insights <span style="color:var(--muted);font-weight:400;margin-left:4px;">quote, weekday & trend</span></span>
+      <span>✦ Insights <span style="color:var(--muted);font-weight:400;margin-left:4px;">weekday pattern & spending trend</span></span>
       <span class="insights-chevron" id="insightsChevron">▾</span>
     </button>
     <div class="insights-body" id="insightsBody">
-      <div class="quote-card">
-        <div class="quote-mark">"</div>
-        <div class="quote-eyebrow">
-          <span>✦ Money thought for today</span>
-          <button class="quote-refresh" id="refreshQuoteBtn">↻ New</button>
-        </div>
-        <div class="quote-text" id="quoteText">Loading…</div>
-        <div class="quote-author" id="quoteAuthor"></div>
-      </div>
-
       <div class="mini-card">
         <div class="mini-card-title">Weekday pattern</div>
         <canvas id="weekdayCanvas" width="280" height="90"></canvas>
@@ -1075,9 +1123,9 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
     <div class="guide-block">
       <h3>Getting started</h3>
       <div class="faq-item"><div class="faq-q">How do I get started?</div>
-        <div class="faq-a">Create your account with an email and password (a quick “verify you’re human” check may appear). A short tour then points out the main buttons — you can replay it any time with the button at the top of this Guide tab. After that, open Settings and: pick your currency, choose how you’re paid (salary or wages), enter your income, and set a budget for each category. Everything else updates automatically as you log expenses. Each new account starts with 16 ready-made categories you can rename, re-budget, add to or remove.</div></div>
+        <div class="faq-a">Create your account with an email and password (a quick “verify you’re human” check may appear). A short tour then points out the main buttons — you can replay it any time with the button at the top of this Guide tab. After that, open Settings and: pick your currency, choose how you’re paid (salary or wages), enter your income, and set a budget for each category. Until you choose how you’re paid, no payday is assumed — the Dashboard shows a “Set up how you’re paid” card instead of a countdown. Everything else updates automatically as you log expenses. Each new account starts with 16 ready-made categories you can rename, re-budget, add to or remove.</div></div>
       <div class="faq-item"><div class="faq-q">What’s the difference between “Salary” and “Wages”?</div>
-        <div class="faq-a"><b>Salary</b> means a fixed payday each month (you choose the day, 1–28; the default is the 25th). Your cycle runs from one payday to the next, and the Dashboard shows the days left and your safe-to-spend-per-day. <b>Wages</b> means no fixed schedule: your cycle starts when you start it and runs until you end it yourself with “Archive this cycle &amp; start fresh” in Settings. Nothing is archived automatically, and because there’s no end date to measure against, the Dashboard shows “Cycle day” instead of a countdown, pace badge or per-day allowance. You can switch in Settings at any time; switching to Wages starts a new open-ended cycle from today.</div></div>
+        <div class="faq-a"><b>Salary</b> means a fixed payday each month (you choose the day, 1–28). Your cycle runs from one payday to the next, and the Dashboard shows the days left and your safe-to-spend-per-day. <b>Wages</b> means no fixed schedule: your cycle starts when you start it and runs until you end it yourself with “Archive this cycle &amp; start fresh” in Settings. Nothing is archived automatically, and because there’s no end date to measure against, the Dashboard shows “Cycle day” instead of a countdown, pace badge or per-day allowance. You can switch in Settings at any time; switching to Wages starts a new open-ended cycle from today.</div></div>
       <div class="faq-item"><div class="faq-q">Why does my payday move around? (Salary)</div>
         <div class="faq-a">Your payday is a fixed day of the month. If it lands on a Saturday or Sunday, the cycle shifts to the Friday before, which is when most salaries are actually paid.</div></div>
       <div class="faq-item"><div class="faq-q">Which currencies can I use, and what happens if I change mine?</div>
@@ -1173,9 +1221,15 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
     </div>
 
     <div class="guide-block">
-      <h3>AI assistant &amp; notes</h3>
-      <div class="faq-item"><div class="faq-q">How does the AI assistant work, and is my data used for training?</div>
-        <div class="faq-a">Tap the floating ✦ button. It sends your current cycle’s numbers (income, spending, categories, a summary of your debts) and your question to an AI service through the app’s server (currently Groq) and shows you the answer. Your conversation is saved in your account so it’s still there next time; the 🗑 icon in the assistant clears it. Whether the AI provider trains on requests depends on that provider’s own policy. The assistant runs on a shared free allowance, so it can occasionally be unavailable when many people are using it.</div></div>
+      <h3>Lotus, quotes &amp; notes</h3>
+      <div class="faq-item"><div class="faq-q">What is Lotus, and what can I ask it?</div>
+        <div class="faq-a">Lotus is the budgeting assistant built into Budget Cockpit. Tap the <b>Lotus</b> button at the bottom left and ask in plain language — for example “Where can I cut back?”, “Am I overspending on food?”, “How am I doing this cycle?” or “What’s the fastest way to pay off my debt?”. Lotus answers using your own numbers, and one-tap suggestions appear when you open it. It’s a good place to ask about where your money is going, whether you’re on track, and ideas for saving or clearing debt.</div></div>
+      <div class="faq-item"><div class="faq-q">What can Lotus see, and what are its limits?</div>
+        <div class="faq-a">Lotus reads a summary of your <b>current cycle</b> — income, spending by category, budgets, savings, the balance left, your debts (who you owe, how much and the interest) and the names of your bills — plus the last few messages of your chat so it can follow up. It does <b>not</b> see individual transactions, past cycles or loans you’ve made, and it can’t change anything: it can’t log expenses, edit budgets or move money. Its answers are guidance, not licensed financial advice, and replies are kept short. Lotus needs an internet connection, and it runs on a shared free allowance — if many people are using it you may see a message that it has reached its limit; just try again a little later.</div></div>
+      <div class="faq-item"><div class="faq-q">Where are my chats with Lotus stored, and is my data used for training?</div>
+        <div class="faq-a">Your question and that cycle summary are sent through the app’s server to an AI service (currently Groq) to produce the answer. Your conversation is saved in your account so it’s there next time; the 🗑 icon inside Lotus clears it. Whether the AI provider trains on requests depends on that provider’s own policy.</div></div>
+      <div class="faq-item"><div class="faq-q">What’s the “Money thought for today” card?</div>
+        <div class="faq-a">A short quote about money, success or good habits near the top of the Dashboard, there to keep you motivated. Tap <b>↻ New</b> for another one. It’s just for inspiration and doesn’t change any of your numbers.</div></div>
       <div class="faq-item"><div class="faq-q">What’s the “My own notes” box for?</div>
         <div class="faq-a">A private scratchpad at the bottom of this tab for your own budgeting rules and reminders. It saves automatically a second after you stop typing.</div></div>
     </div>
@@ -1273,6 +1327,8 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
       </div>
       <p id="paydayHint" style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;">
         If your payday lands on a Saturday or Sunday, it's automatically treated as the Friday before — same as most salary payments.</p>
+      <p id="payChoiceHint" style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;display:none;">
+        Choose how you're paid to start your pay cycle. Until you do, Budget Cockpit doesn't assume a payday.</p>
       <p id="wagesHint" style="font-size:11px;color:var(--muted);margin:-8px 0 14px;line-height:1.5;display:none;">
         Your cycle runs until you end it yourself — use "Archive this cycle & start fresh" below whenever you're ready to start a new one. Nothing archives automatically.</p>
       <div class="field">
@@ -1481,8 +1537,13 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
 </div>
 
 <button class="fab" id="fabAdd" aria-label="Log an expense">+</button>
-<button class="ai-fab" id="askAiFab" aria-label="AI assistant">
-  <span class="ai-fab-icon">✦</span>
+<div class="lotus-hint" id="lotusHint" style="display:none;" role="status">
+  <span>Hi, I'm <b>Lotus</b> — ask me anything about your money.</span>
+  <button type="button" id="lotusHintClose" aria-label="Dismiss">✕</button>
+</div>
+<button class="ai-fab ai-fab-new" id="askAiFab" aria-label="Ask Lotus, your budgeting assistant">
+  <svg class="ai-fab-icon" viewBox="0 0 32 32" aria-hidden="true"><use href="#lotusSym"/></svg>
+  <span class="ai-fab-label">Lotus</span>
 </button>
 
 <div class="nav">
@@ -1767,17 +1828,17 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
 <div class="sheet ai-sheet" id="aiSheet">
   <div class="sheet-handle"></div>
   <div class="ai-sheet-header">
-    <div class="ai-avatar">✦</div>
+    <div class="ai-avatar"><svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><use href="#lotusSym"/></svg></div>
     <div>
-      <h3 style="margin:0;">AI assistant</h3>
-      <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">Based on this cycle's numbers — not financial advice</p>
+      <h3 style="margin:0;">Lotus</h3>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">Your budgeting assistant · based on this cycle's numbers — not financial advice</p>
     </div>
     <button class="ai-clear-btn" id="aiClearBtn" title="Clear conversation" aria-label="Clear conversation">🗑</button>
   </div>
   <div class="ai-chat" id="aiChat"></div>
   <div class="ai-chips" id="aiChips"></div>
   <div class="ai-input-row">
-    <input type="text" id="aiQuestion" placeholder="Ask about your spending, budget, or savings…">
+    <input type="text" id="aiQuestion" placeholder="Ask Lotus about your spending, budget or savings…">
     <button class="ai-send-btn" id="aiAskBtn">➤</button>
   </div>
   <button class="btn btn-ghost" id="aiCloseBtn" style="margin-top:10px;">Close</button>
