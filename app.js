@@ -16,8 +16,9 @@ const DEFAULT_CATEGORIES = [
   {id:'ent', name:'Entertainment', group:'Wants', budget:0, threshold:0.80, icon:'🎬'},
   {id:'subs', name:'Subscriptions', group:'Wants', budget:0, threshold:0.80, icon:'📺'},
   {id:'misc', name:'Misc / Buffer', group:'Wants', budget:0, threshold:0.80, icon:'🧾'},
-  {id:'emergency', name:'Emergency Fund', group:'Savings', budget:0, threshold:null, goal:0, icon:'🚨'},
-  {id:'invest', name:'Savings / Investment', group:'Savings', budget:0, threshold:null, goal:0, icon:'📈'},
+  {id:'emergency', name:'Emergency Fund', group:'Savings', budget:0, threshold:null, goal:0, icon:'🚨', kind:'savings'},
+  {id:'savings', name:'Savings', group:'Savings', budget:0, threshold:null, goal:0, icon:'💰', kind:'savings'},
+  {id:'invest', name:'Investments', group:'Savings', budget:0, threshold:null, goal:0, icon:'📈', kind:'investment'},
 ];
 const DEFAULT_ICON_BY_GROUP = { Needs:'📌', Wants:'✨', Savings:'💰' };
 
@@ -251,7 +252,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.15.0';
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -650,6 +651,12 @@ function applyConflictMerge(serverState){
   const localSnapshot = state; // in-memory state as it stood right before this merge
   try{ localStorage.setItem(CONFLICT_BACKUP_KEY, JSON.stringify({ at: Date.now(), state: localSnapshot })); }catch(e){}
   const { merged, recovered } = mergeStateOnConflict(serverState, localSnapshot);
+  // Settings you just changed on THIS device (reminders, income, pay type, …)
+  // must not be silently reverted to the server's older values — that made a
+  // freshly-toggled reminder switch itself back off.
+  ['income','paydayDay','payType','payConfigured','currency','email','theme','reminderEnabled','reminderTime','reminderChannels','debtStrategy','debtFocusId'].forEach(k=>{
+    if(localSnapshot[k] !== undefined) merged[k] = localSnapshot[k];
+  });
   state = merged;
   // The merge may have added items the server doesn't have yet — queue
   // another save so they actually get persisted, not just held in memory.
@@ -671,6 +678,7 @@ function refreshSyncBackupUI(){
   document.getElementById('syncBackupDate').textContent = new Date(backup.at).toLocaleString();
 }
 document.getElementById('syncBackupDownloadBtn')?.addEventListener('click', ()=>{
+  if(figuresHiddenBlock('download the backup')) return;
   let backup = null;
   try{ backup = JSON.parse(localStorage.getItem(CONFLICT_BACKUP_KEY) || 'null'); }catch(e){}
   if(!backup) return;
@@ -778,6 +786,12 @@ function catById(id){ return state.categories.find(c=>c.id===id); }
 function isSavingsCat(id){ const c = catById(id); return !!(c && c.group==='Savings'); }
 
 function spendingCategories(){ return state.categories.filter(c=>c.group!=='Savings'); }
+// Savings-group categories are either plain savings or investments. Older
+// categories have no explicit kind, so it's inferred from the id/name.
+function catKind(cat){
+  if(cat && (cat.kind === 'investment' || cat.kind === 'savings')) return cat.kind;
+  return (cat && (cat.id === 'invest' || /invest/i.test(cat.name || ''))) ? 'investment' : 'savings';
+}
 function savingsCategories(){ return state.categories.filter(c=>c.group==='Savings'); }
 
 function spentFor(catId){ return state.transactions.filter(t=>t.categoryId===catId).reduce((s,t)=>s+Number(t.amount),0); }
@@ -1040,7 +1054,9 @@ function updatePaydayCard(){
   cd.textContent = days + 'd ' + pad(hours) + 'h ' + pad(mins) + 'm ' + pad(secs) + 's to payday';
 }
 let privacyMode = false;
-try{ privacyMode = localStorage.getItem('privacyMode') === '1'; }catch(e){}
+// (The old "hide just this balance" eye is folded into this single switch: hiding
+// a figure in one place used to leave it visible in Settings, History, etc.)
+try{ privacyMode = localStorage.getItem('privacyMode') === '1' || localStorage.getItem('heroBalanceHidden') === '1'; }catch(e){}
 let txSearchTerm = '';
 function applyPrivacyModeUI(){
   const btn = document.getElementById('privacyToggleBtn');
@@ -1050,33 +1066,86 @@ function applyPrivacyModeUI(){
   btn.classList.toggle('privacy-active', privacyMode);
   document.body.classList.toggle('privacy-on', privacyMode);
 }
-document.getElementById('privacyToggleBtn').addEventListener('click', ()=>{
-  privacyMode = !privacyMode;
-  try{ localStorage.setItem('privacyMode', privacyMode ? '1' : '0'); }catch(e){}
-  applyPrivacyModeUI();
-  renderAll(); // fmt() checks privacyMode directly, so every figure app-wide updates in one pass
-});
-
-// A separate, narrower hide toggle for just the hero "Available this cycle"
-// balance — independent of the app-wide privacy mode above, for when you
-// want to keep everything else visible but hide only the headline number
-// (e.g. glancing at the app around someone without flashing your balance).
-let heroBalanceHidden = false;
-try{ heroBalanceHidden = localStorage.getItem('heroBalanceHidden') === '1'; }catch(e){}
+let heroBalanceHidden = privacyMode; // kept in step with privacyMode (the dashboard reads it)
 function applyHeroHideUI(){
   const btn = document.getElementById('heroHideBtn');
   if(!btn) return;
-  btn.textContent = heroBalanceHidden ? '🙈' : '👁️';
-  btn.title = heroBalanceHidden ? 'Show this balance' : 'Hide just this balance';
+  btn.textContent = privacyMode ? '🙈' : '👁️';
+  btn.title = privacyMode ? 'Show figures' : 'Hide figures';
 }
-document.getElementById('heroHideBtn').addEventListener('click', (e)=>{
-  e.stopPropagation();
-  heroBalanceHidden = !heroBalanceHidden;
-  try{ localStorage.setItem('heroBalanceHidden', heroBalanceHidden ? '1' : '0'); }catch(e){}
-  applyHeroHideUI();
-  renderDashboard();
-});
+function setPrivacy(on){
+  privacyMode = on; heroBalanceHidden = on;
+  try{ localStorage.setItem('privacyMode', on ? '1' : '0'); localStorage.removeItem('heroBalanceHidden'); }catch(e){}
+  applyPrivacyModeUI(); applyHeroHideUI();
+  renderAll(); // fmt() checks privacyMode directly, so every figure app-wide updates in one pass
+}
+// Hiding is instant; SHOWING again has to prove it's you when a PIN or
+// biometrics is set — otherwise anyone holding your unlocked phone could just
+// tap the eye. With neither set it can't verify anyone, so it just reveals.
+async function togglePrivacy(){
+  if(!privacyMode){ setPrivacy(true); return; }
+  if(await ownerReveal()) setPrivacy(false);
+}
+// Several screens show figures that can't be masked in place (reports, exports,
+// Lotus' chat history, backups) — while hidden they stay closed.
+function figuresHiddenBlock(what){
+  if(!privacyMode) return false;
+  showToast('Figures are hidden — tap the eye and unlock to ' + what);
+  return true;
+}
+// Money fields never get pre-filled with a real amount while hidden.
+function moneyFieldValue(v){ return privacyMode ? '' : v; }
+function applyMoneyPlaceholder(el, normal){ if(el) el.placeholder = privacyMode ? 'Hidden — type a new amount' : (normal || ''); }
+document.getElementById('privacyToggleBtn').addEventListener('click', togglePrivacy);
+document.getElementById('heroHideBtn').addEventListener('click', (e)=>{ e.stopPropagation(); togglePrivacy(); });
 applyHeroHideUI();
+
+/* ---- owner check before revealing hidden figures ---- */
+const revealSheet = document.getElementById('revealSheet');
+let revealResolve = null, revealFails = 0;
+function ownerReveal(){
+  const pin = hasPinSet(), bio = hasBioSet();
+  if(!pin && !bio){
+    try{
+      if(!sessionStorage.getItem('revealNudged')){ sessionStorage.setItem('revealNudged','1'); showToast('Tip: set a PIN or fingerprint in Settings so only you can show hidden figures'); }
+    }catch(e){}
+    return Promise.resolve(true);
+  }
+  return new Promise(resolve=>{
+    revealResolve = resolve; revealFails = 0;
+    document.getElementById('revealError').textContent = '';
+    document.getElementById('revealPinInput').value = '';
+    document.getElementById('revealPinRow').style.display = pin ? '' : 'none';
+    document.getElementById('revealBioBtn').style.display = bio ? '' : 'none';
+    document.getElementById('revealText').textContent = pin && bio ? 'Enter your PIN or use your fingerprint / face to show your figures.' : pin ? 'Enter your PIN to show your figures.' : 'Use your fingerprint / face to show your figures.';
+    activeSheet = revealSheet; openSheetEl(revealSheet);
+    if(pin) setTimeout(()=>document.getElementById('revealPinInput').focus(), 250);
+  });
+}
+function closeReveal(result){
+  closeSheetEl(revealSheet); activeSheet = null;
+  const r = revealResolve; revealResolve = null;
+  if(r) r(!!result);
+}
+document.getElementById('revealCancelBtn').addEventListener('click', ()=>closeReveal(false));
+async function revealWithPin(){
+  const input = document.getElementById('revealPinInput'), err = document.getElementById('revealError');
+  const pin = input.value;
+  if(!/^\d{6}$/.test(pin)){ err.textContent = 'Enter your 6-digit PIN'; return; }
+  let stored = ''; try{ stored = localStorage.getItem(PIN_HASH_KEY) || ''; }catch(e){}
+  const entered = await hashPin(pin);
+  input.value = '';
+  if(stored && entered === stored){ closeReveal(true); return; }
+  revealFails++;
+  if(revealFails >= PIN_MAX_ATTEMPTS){ closeReveal(false); lockNow(); return; } // too many wrong PINs: sign out
+  err.textContent = 'Incorrect PIN (' + (PIN_MAX_ATTEMPTS - revealFails) + ' attempt' + (PIN_MAX_ATTEMPTS - revealFails === 1 ? '' : 's') + ' left)';
+}
+document.getElementById('revealPinBtn').addEventListener('click', revealWithPin);
+document.getElementById('revealPinInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') revealWithPin(); });
+document.getElementById('revealBioBtn').addEventListener('click', async ()=>{
+  if(await verifyBiometrics()) closeReveal(true);
+  else document.getElementById('revealError').textContent = 'Biometric check failed or was cancelled — try again or use your PIN.';
+});
 
 let clockStyle = 'digital';
 try{ clockStyle = localStorage.getItem('clockStyle') || 'digital'; }catch(e){}
@@ -1770,7 +1839,23 @@ function renderSavingsTab(){
   const cats = savingsCategories();
   if(!cats.length){ wrap.innerHTML = '<div class="empty-hist" style="margin:0 20px;">No savings categories set up.</div>'; return; }
   wrap.innerHTML = '';
-  cats.forEach(cat=>{
+  // Savings and investments are shown as two separate cards, each with its own
+  // total and its own goals, instead of one mixed list.
+  const sections = [
+    {kind:'savings', title:'Savings', icon:'💰', verb:'contributed', empty:'No savings categories yet — add one in Settings (Group → Savings).'},
+    {kind:'investment', title:'Investments', icon:'📈', verb:'invested', empty:'No investment categories yet — add one in Settings (Group → Investments).'}
+  ];
+  sections.forEach(sec=>{
+  const list = cats.filter(c=>catKind(c) === sec.kind);
+  const secTotal = list.reduce((s,c)=>s+lifetimeSaved(c.id),0);
+  const secCycle = list.reduce((s,c)=>s+spentFor(c.id),0);
+  const sum = document.createElement('div');
+  sum.className = 'sv-summary ' + sec.kind;
+  sum.dataset.kind = sec.kind;
+  sum.innerHTML = `<div class="sv-sum-top"><span class="sv-sum-title">${sec.icon} ${sec.title}</span><span class="sv-sum-total">${fmt(secTotal)}</span></div>
+    <div class="sv-sum-sub">${list.length ? '+' + fmt(secCycle) + ' ' + sec.verb + ' this cycle · ' + list.length + ' ' + (list.length === 1 ? 'pot' : 'pots') : sec.empty}</div>`;
+  wrap.appendChild(sum);
+  list.forEach(cat=>{
     const total = lifetimeSaved(cat.id);
     const thisCycle = spentFor(cat.id);
     const goal = Number(cat.goal)||0;
@@ -1785,15 +1870,16 @@ function renderSavingsTab(){
             <div class="save-name">${cat.icon?escapeHtml(cat.icon)+' ':''}${escapeHtml(cat.name)}</div>
             <div style="display:flex;align-items:center;gap:6px;">
               <div class="save-amt">${fmt(total)}</div>
-              <button class="save-adjust-btn" data-adjust="${cat.id}" data-name="${escapeHtml(cat.name)}" aria-label="Adjust total saved" title="Adjust total saved">✎</button>
+              <button class="save-adjust-btn" data-adjust="${cat.id}" data-kind="${sec.kind}" data-name="${escapeHtml(cat.name)}" aria-label="Adjust total saved" title="Adjust total saved">✎</button>
             </div>
           </div>
-          <div class="save-sub">+${fmt(thisCycle)} contributed this cycle</div>
+          <div class="save-sub">+${fmt(thisCycle)} ${sec.verb} this cycle</div>
         </div>
       </div>
       ${goal>0 ? `<div class="save-foot" style="margin-top:8px;"><span>Goal: ${fmt(goal)}</span></div>` : `<div class="save-foot"><span>No goal set — add one in Settings</span></div>`}
     `;
     wrap.appendChild(div);
+  });
   });
   wrap.querySelectorAll('[data-adjust]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -1801,7 +1887,7 @@ function renderSavingsTab(){
       openAdjustSheet({
         type: 'savings', id: catId,
         title: 'Adjust ' + btn.dataset.name,
-        label: 'Total saved (lifetime) ' + (state.currency||'₦'),
+        label: (btn.dataset.kind === 'investment' ? 'Total invested (lifetime) ' : 'Total saved (lifetime) ') + (state.currency||'₦'),
         hint: 'Sets the total directly — use this to correct it if money was withdrawn outside the app, or to clear it (enter 0) if this goal no longer applies.',
         prefill: lifetimeSaved(catId)
       });
@@ -2232,7 +2318,7 @@ function histDateLabel(dateStr){
 }
 function histTimeLabel(iso){
   const d = iso ? new Date(iso) : null;
-  return d && !isNaN(d) ? d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'}) : '';
+  return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false}) : '';
 }
 // {date, at} -> {when, logged}: "12 Sep 2026 · 3:42 PM" when the payment date
 // and the moment it was logged fall on the same day, otherwise the payment
@@ -2317,7 +2403,8 @@ let payEditCtx = null;
 function openPayEdit(idx){
   const rec = payHistRecs[idx]; if(!rec || payHistKind !== 'debt') return;
   payEditCtx = { debtId: payHistItemId, rec };
-  document.getElementById('payEditAmount').value = rec.amount;
+  document.getElementById('payEditAmount').value = moneyFieldValue(rec.amount);
+  applyMoneyPlaceholder(document.getElementById('payEditAmount'));
   document.getElementById('payEditDate').value = rec.date || '';
   document.getElementById('payEditNote').textContent = rec.source === 'archived'
     ? 'This payment is in the archived cycle ' + rec.label + '. Changing it also corrects that cycle\'s totals and how much you\'ve paid on this debt.'
@@ -2355,7 +2442,8 @@ function applyDebtPaymentChange(debtId, rec, newAmount, newDate, remove){
 }
 document.getElementById('payEditSaveBtn').addEventListener('click', ()=>{
   const ctx = payEditCtx; if(!ctx) return;
-  const amt = Number(document.getElementById('payEditAmount').value);
+  const rawAmt = document.getElementById('payEditAmount').value;
+  const amt = (rawAmt === '' && privacyMode) ? ctx.rec.amount : Number(rawAmt); // blank while hidden = unchanged
   if(!(amt > 0)){ showToast('Enter an amount above zero — or use Delete'); return; }
   const date = document.getElementById('payEditDate').value;
   if(!applyDebtPaymentChange(ctx.debtId, ctx.rec, amt, date, false)){ showToast('Could not find that payment'); closePayEdit(false); return; }
@@ -2378,7 +2466,8 @@ function openDebtEditSheet(id){
   debtEditId = id;
   document.getElementById('debtEditCreditor').value = d.creditor || '';
   document.getElementById('debtEditReason').value = d.reason || '';
-  document.getElementById('debtEditAmount').value = d.amount;
+  document.getElementById('debtEditAmount').value = moneyFieldValue(d.amount);
+  applyMoneyPlaceholder(document.getElementById('debtEditAmount'));
   document.getElementById('debtEditInterest').value = d.interestRate || '';
   activeSheet = debtEditSheet; openSheetEl(debtEditSheet);
 }
@@ -2386,7 +2475,8 @@ document.getElementById('debtEditCancelBtn').addEventListener('click', ()=>{ clo
 document.getElementById('debtEditSaveBtn').addEventListener('click', ()=>{
   const d = debtById(debtEditId); if(!d) return;
   const creditor = document.getElementById('debtEditCreditor').value.trim();
-  const amount = Number(document.getElementById('debtEditAmount').value);
+  const rawDebtAmt = document.getElementById('debtEditAmount').value;
+  const amount = (rawDebtAmt === '' && privacyMode) ? Number(d.amount) : Number(rawDebtAmt); // blank while hidden = unchanged
   if(!creditor){ showToast('Enter who it\'s owed to'); return; }
   if(!(amount > 0)){ showToast('Enter the total owed'); return; }
   d.creditor = creditor;
@@ -2414,8 +2504,9 @@ function openWriteOffSheet(kind, id){
   document.getElementById('writeOffNote').textContent = kind === 'debt'
     ? 'Use this when ' + who + ' has forgiven or cancelled what you still owe. No money moves: your balance and spending stay exactly as they are, the payments you made stay on record, and the cancelled part is simply no longer owed. You can undo it later.'
     : 'Use this when you choose to forgive what ' + who + ' still owes you, or accept you won\'t get it back. Nothing is added to your income or balance, repayments you already received stay on record, and the forgiven part is simply no longer expected. You can undo it later.';
-  document.getElementById('writeOffAmount').value = Math.round(rem);
-  document.getElementById('writeOffAmount').max = Math.round(rem);
+  document.getElementById('writeOffAmount').value = moneyFieldValue(Math.round(rem));
+  applyMoneyPlaceholder(document.getElementById('writeOffAmount'));
+  document.getElementById('writeOffAmount').max = privacyMode ? '' : Math.round(rem);
   document.getElementById('writeOffRemainingHint').textContent = fmt(rem) + ' is still outstanding. Enter less to write off only part of it.';
   document.getElementById('writeOffDate').value = toDateInput(new Date());
   activeSheet = writeOffSheet; openSheetEl(writeOffSheet);
@@ -2726,7 +2817,7 @@ function renderSettings(){
       <div class="settings-row">
         <div class="field">
           <label>${isSavings ? 'Per-cycle target '+(state.currency||'₦') : 'Budget '+(state.currency||'₦')}</label>
-          <input type="number" class="cat-budget" data-id="${cat.id}" value="${cat.budget}" min="0" step="1">
+          <input type="number" class="cat-budget" data-id="${cat.id}" value="${privacyMode ? '' : cat.budget}" placeholder="${privacyMode ? '••••' : ''}" min="0" step="1">
         </div>
         ${!isSavings ? `
         <div class="field">
@@ -2735,9 +2826,15 @@ function renderSettings(){
         </div>` : `
         <div class="field">
           <label>Lifetime goal ${state.currency||'₦'}</label>
-          <input type="number" class="cat-goal" data-id="${cat.id}" value="${cat.goal||0}" min="0" step="1">
+          <input type="number" class="cat-goal" data-id="${cat.id}" value="${privacyMode ? '' : (cat.goal||0)}" placeholder="${privacyMode ? '••••' : ''}" min="0" step="1">
         </div>`}
       </div>
+      ${isSavings ? `
+      <div class="field"><label>Counts as</label>
+        <select class="cat-kind" data-id="${cat.id}">
+          <option value="savings" ${catKind(cat)==='savings'?'selected':''}>Savings</option>
+          <option value="investment" ${catKind(cat)==='investment'?'selected':''}>Investment</option>
+        </select></div>` : ''}
       ${!isSavings ? `
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin:-6px 0 8px;cursor:pointer;">
         <input type="checkbox" class="cat-rollover" data-id="${cat.id}" style="width:auto;margin:0;" ${cat.rollover?'checked':''}>
@@ -2748,6 +2845,7 @@ function renderSettings(){
   });
   wrap.querySelectorAll('.cat-budget').forEach(inp=>{
     inp.addEventListener('change', e=>{
+      if(privacyMode && e.target.value === '') return; // a hidden (blank) field means "leave it alone"
       catById(e.target.dataset.id).budget = Math.max(Number(e.target.value)||0, 0);
       saveState(); renderAll();
     });
@@ -2758,8 +2856,16 @@ function renderSettings(){
       saveState(); renderAll();
     });
   });
+  wrap.querySelectorAll('.cat-kind').forEach(sel=>{
+    sel.addEventListener('change', e=>{
+      const c = catById(e.target.dataset.id); if(!c) return;
+      c.kind = e.target.value === 'investment' ? 'investment' : 'savings';
+      saveState(); renderAll();
+    });
+  });
   wrap.querySelectorAll('.cat-goal').forEach(inp=>{
     inp.addEventListener('change', e=>{
+      if(privacyMode && e.target.value === '') return;
       catById(e.target.dataset.id).goal = Math.max(Number(e.target.value)||0, 0);
       saveState(); renderAll();
     });
@@ -2884,7 +2990,7 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     btn.classList.add('active');
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
-    if(btn.dataset.view === 'settings') renderSharesList();
+    if(btn.dataset.view === 'settings'){ renderSharesList(); loadReminderStatus(); }
     window.scrollTo({top: 0, behavior: 'instant'});
   });
 });
@@ -3031,7 +3137,8 @@ function openEditTx(t){
   editingTxId = t.id;
   document.getElementById('addSheetTitle').textContent = 'Edit expense';
   document.getElementById('txSaveBtn').textContent = 'Save changes';
-  document.getElementById('txAmount').value = t.amount;
+  document.getElementById('txAmount').value = moneyFieldValue(t.amount);
+  applyMoneyPlaceholder(document.getElementById('txAmount'), '0');
   document.getElementById('txCategory').value = t.categoryId;
   document.getElementById('txMethod').value = t.method || '';
   document.getElementById('txDesc').value = t.desc || '';
@@ -3043,7 +3150,9 @@ function openEditTx(t){
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
 document.getElementById('txSaveBtn').addEventListener('click', ()=>{
-  const amount = Number(document.getElementById('txAmount').value);
+  const rawTxAmt = document.getElementById('txAmount').value;
+  const editingTx = editingTxId ? state.transactions.find(x=>x.id===editingTxId) : null;
+  const amount = (rawTxAmt === '' && privacyMode && editingTx) ? Number(editingTx.amount) : Number(rawTxAmt); // blank while hidden = unchanged
   const categoryId = document.getElementById('txCategory').value;
   const method = document.getElementById('txMethod').value;
   const desc = document.getElementById('txDesc').value.trim();
@@ -3321,6 +3430,7 @@ document.getElementById('askAiFab').addEventListener('click', ()=>{
     showToast('Lotus needs an internet connection');
     return;
   }
+  if(figuresHiddenBlock('use Lotus (its answers and your chat contain your figures)')) return;
   hideLotusHint();
   try{ localStorage.setItem(LOTUS_OPENED_KEY, '1'); }catch(e){}
   document.getElementById('askAiFab').classList.remove('ai-fab-new');
@@ -3497,9 +3607,11 @@ document.getElementById('addCatBtn').addEventListener('click', ()=>{
   let id = baseId, n = 1;
   while(catById(id)){ id = baseId + '-' + (++n); }
 
-  const icon = DEFAULT_ICON_BY_GROUP[group] || '📌';
-  const newCat = group === 'Savings'
-    ? { id, name, group, budget:0, threshold:null, goal:0, icon }
+  const isInvestment = group === 'Investments';
+  const realGroup = isInvestment ? 'Savings' : group;
+  const icon = isInvestment ? '📈' : (DEFAULT_ICON_BY_GROUP[realGroup] || '📌');
+  const newCat = realGroup === 'Savings'
+    ? { id, name, group: 'Savings', budget:0, threshold:null, goal:0, icon, kind: isInvestment ? 'investment' : 'savings' }
     : { id, name, group, budget:0, threshold:0.85, icon };
   state.categories.push(newCat);
   saveState(); renderAll();
@@ -3763,6 +3875,7 @@ function showReport(d, opts){
 }
 
 function openReport(){
+  if(figuresHiddenBlock('open the report')) return;
   const d = buildReportData();
   showReport(d, {
     title: 'Cycle report',
@@ -3776,6 +3889,7 @@ function openReport(){
 // Note: uses that cycle's own budget total, but current category names/order —
 // a category renamed since then will show under its current name.
 function openReportForHistory(h){
+  if(figuresHiddenBlock('open this report')) return;
   const snapshot = {
     transactions: h.transactions || [],
     extraIncome: h.extraIncome || [],
@@ -4152,7 +4266,8 @@ function openAdjustSheet(opts){
   document.getElementById('adjustSheetTitle').textContent = opts.title;
   document.getElementById('adjustSheetLabel').textContent = opts.label;
   document.getElementById('adjustSheetHint').textContent = opts.hint || '';
-  document.getElementById('adjustSheetInput').value = opts.prefill != null ? opts.prefill : '';
+  document.getElementById('adjustSheetInput').value = opts.prefill != null ? moneyFieldValue(opts.prefill) : '';
+  applyMoneyPlaceholder(document.getElementById('adjustSheetInput'));
   activeSheet = adjustSheet; openSheetEl(adjustSheet);
 }
 document.getElementById('adjustSheetCancelBtn').addEventListener('click', ()=>{ closeSheetEl(adjustSheet); activeSheet=null; adjustContext=null; });
@@ -4238,6 +4353,8 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
     showToast('Cycle archived — fresh start!');
   }
 
+  // The report is full of figures — don't pop it open while they're hidden.
+  if(privacyMode){ showToast('Cycle archived — tap the eye to unlock, then open its report from History'); return; }
   showReport(d, {
     title: 'Cycle report',
     periodLabel: 'Cycle: ' + closedLabel,
@@ -5104,15 +5221,52 @@ function urlBase64ToUint8Array(base64){
   for(let i=0;i<raw.length;i++) out[i] = raw.charCodeAt(i);
   return out;
 }
+// navigator.serviceWorker.ready never settles if no worker is registered, which
+// made "Allow push notifications" look like it did nothing at all.
+function swReady(ms){
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_, rej)=>setTimeout(()=>rej(new Error('sw-timeout')), ms || 8000))
+  ]);
+}
+function onIosBrowserTab(){
+  return /iPhone|iPad|iPod/.test(navigator.userAgent || '') && !(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+}
 function pushSupported(){ return !!(window.PushManager && navigator.serviceWorker); }
 
+// 24-hour time picker (two dropdowns) — a native time box shows AM/PM on many
+// phones, which is easy to get wrong. Minutes go in 5s; a time saved earlier
+// that isn't a multiple of 5 is added so it still displays exactly.
+function buildReminderTimeOptions(){
+  const h = document.getElementById('reminderHourSel'), m = document.getElementById('reminderMinSel');
+  if(!h || !m || h.options.length) return;
+  for(let i=0;i<24;i++) h.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0')));
+  for(let i=0;i<60;i+=5) m.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0')));
+}
+function setReminderTime(val){
+  buildReminderTimeOptions();
+  const h = document.getElementById('reminderHourSel'), m = document.getElementById('reminderMinSel');
+  if(!h || !m) return;
+  const parts = String(val || '20:00').split(':');
+  const hh = String(Math.min(Math.max(parseInt(parts[0],10)||0,0),23)).padStart(2,'0');
+  const mm = String(Math.min(Math.max(parseInt(parts[1],10)||0,0),59)).padStart(2,'0');
+  if(![...m.options].some(o=>o.value===mm)){
+    const opt = new Option(mm, mm); let placed = false;
+    [...m.options].forEach(o=>{ if(!placed && Number(o.value) > Number(mm)){ m.add(opt, o); placed = true; } });
+    if(!placed) m.add(opt);
+  }
+  h.value = hh; m.value = mm;
+}
+function getReminderTime(){
+  const h = document.getElementById('reminderHourSel'), m = document.getElementById('reminderMinSel');
+  return (h && m && h.value && m.value) ? h.value + ':' + m.value : '20:00';
+}
 function refreshReminderUI(){
   const en = document.getElementById('reminderEnabledCheck');
   if(en) en.checked = !!state.reminderEnabled;
   const opts = document.getElementById('reminderOptions');
   if(opts) opts.style.display = state.reminderEnabled ? '' : 'none';
-  const t = document.getElementById('reminderTimeInput');
-  if(t) t.value = state.reminderTime || '20:00';
+  setReminderTime(state.reminderTime || '20:00');
   const chans = String(state.reminderChannels || 'push,email').split(',').map(c=>c.trim());
   const pc = document.getElementById('reminderChanPush'); if(pc) pc.checked = chans.includes('push');
   const ec = document.getElementById('reminderChanEmail'); if(ec) ec.checked = chans.includes('email');
@@ -5121,7 +5275,10 @@ function refreshReminderUI(){
 function refreshReminderPushStatus(){
   const btn = document.getElementById('reminderPushEnableBtn');
   const st = document.getElementById('reminderPushStatus');
-  if(!pushSupported()){ if(st) st.textContent='Not supported on this browser'; if(btn) btn.style.display='none'; return; }
+  if(!pushSupported()){
+    if(st) st.textContent = onIosBrowserTab() ? 'On iPhone/iPad, add Budget Cockpit to your Home Screen (Share → Add to Home Screen) and open it from there to use push notifications' : 'Not supported on this browser';
+    if(btn) btn.style.display='none'; return;
+  }
   if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){
     if(st) st.textContent = 'Push not set up yet on this app (missing VAPID key)'; if(btn) btn.style.display='none'; return;
   }
@@ -5129,6 +5286,85 @@ function refreshReminderPushStatus(){
   if(btn) btn.style.display = perm === 'granted' ? 'none' : '';
   if(st) st.textContent = perm === 'granted' ? 'Push notifications are on for this device' : perm === 'denied' ? 'Blocked in browser settings' : 'Not enabled yet';
 }
+
+// What's actually wired up, checked against the server, plus a real test send —
+// so "it never triggers" shows the actual reason instead of staying a mystery.
+async function localPushState(){
+  if(!pushSupported() || typeof Notification === 'undefined') return 'unsupported';
+  if(Notification.permission === 'denied') return 'denied';
+  try{ const reg = await swReady(3000); const sub = reg && await reg.pushManager.getSubscription(); return sub ? 'subscribed' : 'not-subscribed'; }
+  catch(e){ return 'unknown'; }
+}
+function maskEmail(e){ const m = String(e||'').match(/^(.).*?(@.*)$/); return m ? m[1] + '••••' + m[2] : e; }
+async function loadReminderStatus(){
+  const box = document.getElementById('reminderDiag');
+  if(!box || !navigator.onLine || !sessionToken) return;
+  let st; try{ st = await apiPost('reminderStatus', {}); }catch(e){ return; }
+  if(!st || st.error) return;
+  const local = await localPushState();
+  const L = [];
+  const ok = t=>L.push('<div class="diag ok">✓ ' + t + '</div>');
+  const bad = t=>L.push('<div class="diag bad">✗ ' + t + '</div>');
+  const info = t=>L.push('<div class="diag">• ' + t + '</div>');
+  const chans = String(st.channels||'').split(',').map(c=>c.trim());
+  if(st.enabled) ok('Reminder is on — ' + escapeHtml(st.time) + ' (' + escapeHtml(st.timezone) + ' time), checked about every 10 minutes');
+  else info('Reminder is off — switch it on and press Save');
+  if(chans.includes('push')){
+    if(local === 'unsupported') bad('This browser can\'t receive push notifications');
+    else if(local === 'denied') bad('Notifications are blocked for this site in your browser settings');
+    else if(local === 'not-subscribed') bad('This device isn\'t subscribed yet — tap "Allow push notifications" (Save does this too)');
+    else if(local === 'subscribed') ok('This device is subscribed to push');
+    if(!st.vapidConfigured) bad('The app\'s server has no push keys set, so push can\'t be sent (the app owner must add the VAPID keys)');
+    else if(!st.pushCount) bad('The server has no saved push device for you yet');
+    else ok('The server has ' + st.pushCount + ' push device' + (st.pushCount === 1 ? '' : 's') + ' saved for you');
+  }
+  if(chans.includes('email')){
+    if(!st.email) bad('No email address saved — add one under "Reports email" in Settings');
+    else ok('Email reminders go to ' + escapeHtml(maskEmail(st.email)));
+    if(!st.emailConfigured) bad('Email sending isn\'t set up on the server (the app owner must add the email key)');
+  }
+  if(st.schedulerAgeMinutes == null) bad('The timed scheduler has never run — the app owner needs to run cron.sql (with the real secret) to switch on timed reminders');
+  else if(st.schedulerAgeMinutes > 30) bad('The timed scheduler last ran ' + st.schedulerAgeMinutes + ' minutes ago — it should run every 10 minutes');
+  else ok('The timed scheduler is running (last tick ' + st.schedulerAgeMinutes + ' min ago)');
+  if(st.loggedToday) info('You\'ve already logged an expense today, so no reminder will be sent today');
+  else if(st.lastSentDate && st.lastSentDate === toDateInput(new Date())) info('A reminder was already sent today');
+  box.innerHTML = L.join('');
+}
+function describeTestResult(r){
+  const out = [];
+  const p = r && r.push, e = r && r.email;
+  if(p){
+    if(p.ok) out.push('Push: sent to ' + p.sent + ' of ' + p.attempted + ' device' + (p.attempted === 1 ? '' : 's') + ' — you should see it now');
+    else if(p.reason === 'server-keys-missing') out.push('Push: the server has no push keys set (app owner must add the VAPID keys)');
+    else if(p.reason === 'no-subscription') out.push('Push: no device is subscribed yet — tap "Allow push notifications" first');
+    else out.push('Push: the push service refused it' + (p.errors && p.errors.length ? ' (' + p.errors[0] + ')' : ''));
+  }
+  if(e){
+    if(e.ok) out.push('Email: sent — check your inbox (and spam)');
+    else if(e.reason === 'no-address') out.push('Email: no address saved under "Reports email" in Settings');
+    else if(e.reason === 'email-not-configured') out.push('Email: sending isn\'t set up on the server (app owner must add the email key)');
+    else out.push('Email: rejected by the email service' + (e.detail ? ' — ' + String(e.detail).slice(0,140) : '') + (/testing emails|verify a domain/i.test(e.detail||'') ? ' (its free test sender only emails the account owner; the app owner must verify a sending domain)' : ''));
+  }
+  return out;
+}
+document.getElementById('reminderTestBtn')?.addEventListener('click', async ()=>{
+  const btn = document.getElementById('reminderTestBtn'), res = document.getElementById('reminderTestResult');
+  const channels = [];
+  if(document.getElementById('reminderChanPush')?.checked) channels.push('push');
+  if(document.getElementById('reminderChanEmail')?.checked) channels.push('email');
+  if(!channels.length){ showToast('Tick Push and/or Email first'); return; }
+  if(!navigator.onLine){ showToast('You need an internet connection to send a test'); return; }
+  btn.disabled = true; res.textContent = 'Sending…';
+  try{
+    if(channels.includes('push') && (await localPushState()) !== 'subscribed') await enablePushNotifications();
+    const r = await apiPost('sendTestReminder', { channels: channels.join(',') });
+    if(r && r.error){ res.textContent = 'Could not send the test: ' + r.error; }
+    else res.innerHTML = describeTestResult(r && r.results).map(l=>'<div>' + escapeHtml(l) + '</div>').join('');
+  }catch(e){ res.textContent = 'Could not reach the server — check your connection and try again.'; }
+  btn.disabled = false;
+  loadReminderStatus();
+});
+
 document.getElementById('reminderEnabledCheck')?.addEventListener('change', (e)=>{
   document.getElementById('reminderOptions').style.display = e.target.checked ? '' : 'none';
 });
@@ -5144,7 +5380,7 @@ async function enablePushNotifications(){
   try{
     const perm = await Notification.requestPermission();
     if(perm !== 'granted'){ showToast('Permission not granted — push stays off, email reminder still works if checked'); refreshReminderPushStatus(); return false; }
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await swReady(10000);
     let sub = await reg.pushManager.getSubscription();
     if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
     const json = sub.toJSON();
@@ -5152,7 +5388,9 @@ async function enablePushNotifications(){
     refreshReminderPushStatus();
     return true;
   }catch(e){
-    showToast('Could not enable push notifications');
+    showToast(e && e.message === 'sw-timeout'
+      ? 'Notifications need the app\'s background worker — fully close and reopen the app, then try again'
+      : 'Could not enable push notifications' + (e && e.message ? ' (' + e.message + ')' : ''));
     refreshReminderPushStatus();
     return false;
   }
@@ -5162,7 +5400,7 @@ document.getElementById('reminderPushEnableBtn')?.addEventListener('click', asyn
 });
 document.getElementById('reminderSaveBtn')?.addEventListener('click', async ()=>{
   const enabled = !!document.getElementById('reminderEnabledCheck')?.checked;
-  const time = document.getElementById('reminderTimeInput')?.value || '20:00';
+  const time = getReminderTime();
   const wantsPush = !!document.getElementById('reminderChanPush')?.checked;
   const wantsEmail = !!document.getElementById('reminderChanEmail')?.checked;
   const chans = [];
@@ -5190,6 +5428,7 @@ document.getElementById('reminderSaveBtn')?.addEventListener('click', async ()=>
   } else {
     showToast('Reminder settings saved');
   }
+  setTimeout(loadReminderStatus, 1500); // after the save has had a moment to reach the server
 });
 // A tap on the push notification focuses this tab and posts this message
 // (see sw.js notificationclick) — jump straight to logging an expense
@@ -5279,15 +5518,27 @@ function tourShow(i){
   if(target && target.scrollIntoView) target.scrollIntoView({block:'center', behavior:'auto'});
   requestAnimationFrame(tourPlace);
 }
+// While the tour runs the page behind it must not scroll — the spotlight is
+// positioned for a specific scroll position and scrolling would pull it away.
+function tourLock(on){
+  document.documentElement.classList.toggle('tour-lock', on);
+  document.body.classList.toggle('tour-lock', on);
+}
+['tourBlock','tourCard','tourSpot'].forEach(id=>{
+  const el = document.getElementById(id);
+  ['wheel','touchmove'].forEach(ev=>el.addEventListener(ev, (e)=>{ if(tourActive) e.preventDefault(); }, {passive:false}));
+});
 function startTour(){
   if(tourActive) return;
   tourActive = true;
+  tourLock(true);
   tourList = TOUR_STEPS.filter(s=>!s.when || s.when());
   ['tourBlock','tourSpot','tourCard'].forEach(id=>{ document.getElementById(id).style.display = 'block'; });
   tourShow(0);
 }
 function endTour(){
   tourActive = false;
+  tourLock(false);
   markTourSeen();
   ['tourBlock','tourSpot','tourCard'].forEach(id=>{ document.getElementById(id).style.display = 'none'; });
   window.scrollTo(0, 0);
@@ -5299,6 +5550,7 @@ document.getElementById('tourBackBtn').addEventListener('click', ()=>tourShow(to
 document.getElementById('tourSkipBtn').addEventListener('click', endTour);
 document.addEventListener('keydown', (e)=>{
   if(!tourActive) return;
+  if([' ','PageUp','PageDown','Home','End','ArrowUp','ArrowDown'].includes(e.key)) e.preventDefault(); // no keyboard scrolling either
   if(e.key === 'Escape') endTour();
   else if(e.key === 'ArrowRight') document.getElementById('tourNextBtn').click();
   else if(e.key === 'ArrowLeft' && tourIdx > 0) tourShow(tourIdx - 1);
