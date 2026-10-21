@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<meta name="app-version" content="1.15.2">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -741,6 +742,13 @@ body:not(.intro-playing) .lock-box > *:nth-child(n+5){animation-delay:.24s;}
   body:not(.intro-playing) .lock-box > *{animation:none;}
 }
 .debt-wo{font-size:11.5px;color:var(--amber);margin:2px 0 8px;}
+.intro-fail{position:absolute;left:16px;right:16px;bottom:max(20px,env(safe-area-inset-bottom));max-width:440px;margin:0 auto;padding:16px;border-radius:16px;background:var(--panel);border:1px solid var(--red);z-index:3;text-align:left;box-shadow:0 12px 36px rgba(0,0,0,.45);}
+.intro-fail-title{font-weight:700;font-size:15px;margin-bottom:6px;}
+.intro-fail-msg{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px;word-break:break-word;}
+.intro-fail-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.intro-fail-btns button{flex:1;min-width:130px;padding:11px 12px;border-radius:10px;border:0;background:var(--gold);color:#1A1204;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;}
+.intro-fail-btns button.g{background:var(--panel-2);color:var(--text);border:1px solid var(--line);}
+.intro-fail-note{font-size:11px;color:var(--muted);margin-top:10px;}
 .diag-box{margin-top:12px;display:flex;flex-direction:column;gap:5px;}
 .diag{font-size:11.5px;line-height:1.5;color:var(--muted);padding:7px 10px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);}
 .diag.ok{color:var(--teal);}
@@ -888,6 +896,15 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div class="intro-status"><span>Securing your session…</span><span>Syncing your numbers…</span><span>Almost there…</span></div>
   </div>
   <div class="intro-skip">Tap to skip</div>
+  <div class="intro-fail" id="introFail" style="display:none" role="alert">
+    <div class="intro-fail-title">The app didn't start properly</div>
+    <div class="intro-fail-msg" id="introFailMsg"></div>
+    <div class="intro-fail-btns">
+      <button type="button" id="introFailReload">Reload</button>
+      <button type="button" id="introFailReset" class="g">Reset app cache &amp; reload</button>
+    </div>
+    <div class="intro-fail-note">Your data is safe — it lives in your account, not on this device.</div>
+  </div>
 </div>
 
 
@@ -1899,6 +1916,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
 <!-- Bot protection on login/signup/password-reset — see config.js for TURNSTILE_SITE_KEY.
      explicit render so app.js controls exactly when/where each widget renders. -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script src="boot-guard.js" defer></script>
 <script src="config.js" defer></script>
 <script src="app.js" defer></script>
 </body>
