@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.15.3';
+window.__APP_VERSION = '1.15.4';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -5441,8 +5441,27 @@ async function enablePushNotifications(){
     const perm = await Notification.requestPermission();
     if(perm !== 'granted'){ showToast('Permission not granted — push stays off, email reminder still works if checked'); refreshReminderPushStatus(); return false; }
     const reg = await swReady(10000);
+    const wantedKey = urlBase64ToUint8Array(vapidKey());
     let sub = await reg.pushManager.getSubscription();
-    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey()) });
+    // A subscription is permanently tied to the VAPID public key it was created
+    // with. If the key changed, the old one can never be delivered to (the push
+    // service answers 403), so drop it here and on the server and make a new one.
+    if(sub){
+      let sameKey = true;
+      try{
+        const have = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+        if(have){
+          sameKey = have.length === wantedKey.length && have.every((b, i) => b === wantedKey[i]);
+        }
+      }catch(_e){ sameKey = true; }
+      if(!sameKey){
+        const oldEndpoint = sub.endpoint;
+        try{ await sub.unsubscribe(); }catch(_e){}
+        try{ await apiPost('removePushSubscription', { endpoint: oldEndpoint }); }catch(_e){}
+        sub = null;
+      }
+    }
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: wantedKey });
     const json = sub.toJSON();
     await apiPost('savePushSubscription', { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
     refreshReminderPushStatus();
