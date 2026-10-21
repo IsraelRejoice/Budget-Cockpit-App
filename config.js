@@ -26,7 +26,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
    "Enable push notifications" in Settings will show an error instead of
    silently doing nothing.
    ============================================================ */
-const VAPID_PUBLIC_KEY = 'BNzUnBcFKCAubkXD8S_ueR-80FQLTieHxPteqijk3IY6IQE4pJjluVVcPJ7c-jD4utWcISIMYOzuAnC1c56SrJA';
+const VAPID_PUBLIC_KEY = 'BF7PSUVBKWyWeA4i96wGef7gFsEHSxtsfGpTN_-eds-g-ooaMcK_2c0S-MHxCipXgJTNmCkwIXOaEuC0DvXxlMQ';
 
 /* Bot protection on login, signup and password reset — Cloudflare Turnstile.
    This is the public Site Key, safe to expose (same as the anon key above).
