@@ -10,11 +10,12 @@
 // it unchanged after a deploy is the classic cause of "I shipped the fix but
 // the app still behaves like the old version" — which is exactly the
 // symptom pattern seen repeatedly on this project.
-const CACHE_NAME = 'budget-cockpit-v27';
+const CACHE_NAME = 'budget-cockpit-v28';
 const APP_SHELL = [
   './',
   './index.html',
   './config.js',
+  './boot-guard.js',
   './app.js',
   './manifest.json',
   './icons/icon-192.png',
@@ -103,7 +104,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return; // let the browser handle this natively
 
   event.respondWith(
-    fetch(event.request)
+    // 'no-cache' = always check with the server (a cheap 304 when unchanged) instead of
+    // trusting the browser's HTTP cache. GitHub Pages caches each file for ~10 minutes, and
+    // without this a page could load a new app.js beside a stale index.html.
+    fetch(event.request, { cache: 'no-cache' })
       .then((response) => {
         // Only cache genuinely good responses. Previously EVERY response was
         // cached, including 404s and 5xx: if a deploy briefly 404'd (GitHub
