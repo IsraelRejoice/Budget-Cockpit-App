@@ -1,4 +1,30 @@
 /* ============================================================
+   VERSION HANDSHAKE — runs before anything else. This app is a handful of
+   separate static files; GitHub Pages and the browser cache each one
+   independently, so for a short time after a deploy a page can end up with a
+   NEW app.js on an OLD index.html (or the reverse). The new script then
+   crashes on elements the old page doesn't have and the loading screen never
+   lifts. index.html carries <meta name="app-version">; if it doesn't match
+   this file, clear the caches and reload once with a cache-busting URL.
+   ============================================================ */
+window.__APP_VERSION = '1.15.2';
+(function versionHandshake(){
+  var meta = document.querySelector('meta[name="app-version"]');
+  if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
+  var key = 'budget-cockpit-sync-reload', tried = null;
+  try{ tried = sessionStorage.getItem(key); }catch(e){}
+  if(tried === window.__APP_VERSION){ window.__versionMismatch = true; return; } // already tried once — carry on, the boot guard explains if it fails
+  try{ sessionStorage.setItem(key, window.__APP_VERSION); }catch(e){}
+  var go = function(){ location.replace(location.pathname + '?r=' + Date.now() + (location.hash || '')); };
+  var jobs = [];
+  if(window.caches && caches.keys) jobs.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); }));
+  if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); }));
+  Promise.all(jobs).then(go, go);
+  throw new Error('Updating to the latest version…'); // stop this mismatched pair from running
+})();
+
+
+/* ============================================================
    DEFAULT DATA
    ============================================================ */
 const DEFAULT_CATEGORIES = [
@@ -252,7 +278,7 @@ const AUTH_URL  = SUPABASE_URL + '/auth/v1';
 // Bump this on every shipped update — shown in Settings so you (and anyone
 // helping you debug) can tell at a glance whether someone's device has
 // actually picked up the latest version, without digging through file dates.
-const APP_VERSION = '1.15.1';
+const APP_VERSION = window.__APP_VERSION;
 
 const STORAGE_KEY = 'budget-cockpit-state';
 const SESSION_KEY = 'budget-cockpit-session';
@@ -822,7 +848,7 @@ function totalBudget(){ return spendingCategories().reduce((s,c)=>s+effectiveBud
 function totalSavingsBudget(){ return savingsCategories().reduce((s,c)=>s+Number(c.budget),0); }
 function extraTotal(){ return state.extraIncome.reduce((s,e)=>s+Number(e.amount),0); }
 function combinedIncome(){ return Number(state.income||0) + extraTotal(); }
-function lifetimeSaved(catId){ return (state.savingsAccumulated[catId]||0) + spentFor(catId); }
+function lifetimeSaved(catId){ return ((state.savingsAccumulated || {})[catId]||0) + spentFor(catId); }
 
 function debtById(id){ return state.debts.find(d=>d.id===id); }
 function paidForDebt(debtId){
@@ -2993,17 +3019,23 @@ function renderRecurringList(){
 /* ============================================================
    RENDER ALL + NAV
    ============================================================ */
+// Each section renders on its own: if one throws (bad data, a missing element),
+// it's logged and the rest of the app still loads — it used to abort startup and
+// leave the loading screen up forever.
+function safeRender(fn){
+  try{ fn(); }catch(e){ console.error('render failed: ' + (fn && fn.name), e); window.__lastRenderError = e; }
+}
 function renderAll(){
-  refreshCycleDates();
-  renderDashboard();
-  if(typeof updatePaydayCard === 'function') updatePaydayCard();
-  renderSavingsTab();
-  renderDebtTab();
-  renderLoanTab();
-  renderHistory();
-  renderSettings();
+  safeRender(refreshCycleDates);
+  safeRender(renderDashboard);
+  safeRender(updatePaydayCard);
+  safeRender(renderSavingsTab);
+  safeRender(renderDebtTab);
+  safeRender(renderLoanTab);
+  safeRender(renderHistory);
+  safeRender(renderSettings);
   const sel = document.getElementById('txCategory');
-  sel.innerHTML = state.categories.map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}${c.group==='Savings'?' (savings)':''}</option>`).join('');
+  if(sel) sel.innerHTML = state.categories.map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}${c.group==='Savings'?' (savings)':''}</option>`).join('');
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -4303,6 +4335,7 @@ document.getElementById('adjustSheetSaveBtn').addEventListener('click', ()=>{
     // lifetimeSaved = savingsAccumulated + this-cycle contributions, so back
     // out the live contribution to land exactly on the total they typed.
     const contributed = spentFor(adjustContext.id);
+    if(!state.savingsAccumulated) state.savingsAccumulated = {};
     state.savingsAccumulated[adjustContext.id] = Math.max(val - contributed, 0);
   } else if(adjustContext.type==='debt'){
     state.debtPaidAccumulated[adjustContext.id] = Math.max((state.debtPaidAccumulated[adjustContext.id]||0) + val, 0);
@@ -4351,6 +4384,7 @@ document.getElementById('archiveBtn').addEventListener('click', async ()=>{
 
   savingsCategories().forEach(c=>{
     const contributed = spentFor(c.id);
+    if(!state.savingsAccumulated) state.savingsAccumulated = {};
     state.savingsAccumulated[c.id] = (state.savingsAccumulated[c.id]||0) + contributed;
   });
 
@@ -5246,6 +5280,9 @@ function urlBase64ToUint8Array(base64){
 }
 // navigator.serviceWorker.ready never settles if no worker is registered, which
 // made "Allow push notifications" look like it did nothing at all.
+// config.js is a separate file the owner edits by hand; an older copy may not
+// define every key, and a missing one must not take the whole app down.
+function vapidKey(){ return (typeof VAPID_PUBLIC_KEY !== 'undefined' && VAPID_PUBLIC_KEY) ? VAPID_PUBLIC_KEY : ''; }
 function swReady(ms){
   return Promise.race([
     navigator.serviceWorker.ready,
@@ -5302,7 +5339,7 @@ function refreshReminderPushStatus(){
     if(st) st.textContent = onIosBrowserTab() ? 'On iPhone/iPad, add Budget Cockpit to your Home Screen (Share → Add to Home Screen) and open it from there to use push notifications' : 'Not supported on this browser';
     if(btn) btn.style.display='none'; return;
   }
-  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){
+  if(!vapidKey() || vapidKey().indexOf('REPLACE_WITH') === 0){
     if(st) st.textContent = 'Push not set up yet on this app (missing VAPID key)'; if(btn) btn.style.display='none'; return;
   }
   const perm = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
@@ -5399,13 +5436,13 @@ document.getElementById('reminderEnabledCheck')?.addEventListener('change', (e)=
 // nothing could ever be delivered, even though everything "looked" on.
 async function enablePushNotifications(){
   if(!pushSupported()){ showToast('Push notifications are not supported on this browser'); return false; }
-  if(!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.indexOf('REPLACE_WITH') === 0){ showToast('Push is not set up on this app yet'); return false; }
+  if(!vapidKey() || vapidKey().indexOf('REPLACE_WITH') === 0){ showToast('Push is not set up on this app yet'); return false; }
   try{
     const perm = await Notification.requestPermission();
     if(perm !== 'granted'){ showToast('Permission not granted — push stays off, email reminder still works if checked'); refreshReminderPushStatus(); return false; }
     const reg = await swReady(10000);
     let sub = await reg.pushManager.getSubscription();
-    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey()) });
     const json = sub.toJSON();
     await apiPost('savePushSubscription', { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
     refreshReminderPushStatus();
@@ -5667,7 +5704,10 @@ async function boot(){
   try{ pendingLockMsg = sessionStorage.getItem('pendingLockMessage') || ''; sessionStorage.removeItem('pendingLockMessage'); }catch(e){}
   showLockScreen(pendingLockMsg);
 }
-boot();
+boot().catch(e=>{
+  console.error('boot failed', e);
+  if(window.__bootFail) window.__bootFail('Startup error: ' + (e && e.message ? e.message : e));
+});
 setTimeout(maybeRolloverIfDue, 6000);
 
 /* ============================================================
