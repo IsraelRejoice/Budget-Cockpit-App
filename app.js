@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.15.2';
+window.__APP_VERSION = '1.15.3';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
