@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<meta name="app-version" content="1.15.4">
+<meta name="app-version" content="1.15.5">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -680,6 +680,11 @@ body{min-height:100vh; padding-bottom:92px;}
 .lock-input{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
   color:var(--text);font-family:'Inter',sans-serif;font-size:16px;padding:14px 16px;text-align:center;}
 .lock-input:focus{outline:none;border-color:var(--gold);}
+.pw-wrap{position:relative;}
+.pw-input{padding-right:64px !important;}
+.pw-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--gold);font-size:12px;font-weight:600;padding:8px 10px;cursor:pointer;border-radius:8px;}
+.pw-eye:active{background:var(--panel-2);}
+
 .lock-error{margin-top:12px;font-size:12px;color:var(--red);min-height:16px;}
 
 /* Loading screen — cinematic intro: a gauge draws itself and its needle sweeps,
@@ -820,7 +825,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     </div>
     <div id="lockPasswordPanel">
     <input type="email" id="lockEmailInput" class="lock-input" placeholder="Email" autocomplete="username" style="margin-bottom:8px;">
-    <input type="password" id="lockPasswordInput" class="lock-input" placeholder="Password" autocomplete="current-password">
+    <div class="pw-wrap"><input type="password" id="lockPasswordInput" class="lock-input pw-input" placeholder="Password" autocomplete="current-password"><button type="button" class="pw-eye" data-pw-toggle="lockPasswordInput" aria-label="Show password" aria-pressed="false">Show</button></div>
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
     <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
     <div id="turnstileAuthBox" style="margin:10px 0;"></div>
@@ -852,8 +857,8 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div class="lock-icon">🔑</div>
     <div class="lock-title">Set a new password</div>
     <p class="lock-sub">You followed a reset link — choose a new password below.</p>
-    <input type="password" id="pwNewInput" class="lock-input" placeholder="New password (at least 6 characters)" autocomplete="new-password" style="margin-bottom:8px;">
-    <input type="password" id="pwNewConfirmInput" class="lock-input" placeholder="Confirm new password" autocomplete="new-password">
+    <div class="pw-wrap" style="margin-bottom:8px;"><input type="password" id="pwNewInput" class="lock-input pw-input" placeholder="New password (at least 6 characters)" autocomplete="new-password" ><button type="button" class="pw-eye" data-pw-toggle="pwNewInput" aria-label="Show password" aria-pressed="false">Show</button></div>
+    <div class="pw-wrap"><input type="password" id="pwNewConfirmInput" class="lock-input pw-input" placeholder="Confirm new password" autocomplete="new-password"><button type="button" class="pw-eye" data-pw-toggle="pwNewConfirmInput" aria-label="Show password" aria-pressed="false">Show</button></div>
     <button class="btn btn-primary" id="pwResetCompleteBtn" style="margin-top:10px;">Set new password &amp; log in</button>
     <div class="lock-spinner" id="pwResetCompleteSpinner" style="display:none;"></div>
     <div class="lock-error" id="pwResetCompleteError"></div>
@@ -1278,7 +1283,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
         <div class="faq-a">Close the app completely and reopen it (or refresh the page) so your device picks up the latest version. The version number is in Settings → About.</div></div>
       <div class="faq-item"><div class="faq-q">Payday has passed but my Dashboard still shows the old cycle.</div>
         <div class="faq-a">Salary accounts roll over automatically — opening the app after payday should start the new cycle within a few minutes. If it doesn’t, check you’re online and refresh. Wages accounts never roll over automatically: use “Archive this cycle &amp; start fresh” in Settings.</div></div>
-      <div class="faq-item"><div class="faq-q">I run my own copy of the app. What must be set up?</div>
+      <div class="faq-item" data-admin-only style="display:none;"><div class="faq-q">I run my own copy of the app. What must be set up?</div>
         <div class="faq-a">Put your Supabase project URL and anon key in <code>config.js</code> (Project Settings → API); a console error naming a domain like “your-project-ref.supabase.co” means it still holds a placeholder. Deploy the <code>api</code> Edge Function with JWT verification off (the function checks sign-in itself), run <code>schema.sql</code>, and register the scheduled jobs in <code>cron.sql</code>. Email reports, reminders and push each need their own keys set as secrets on the function.</div></div>
     </div>
 
@@ -1521,8 +1526,8 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
         </div>
       </div>
       <button class="btn btn-primary" id="reminderSaveBtn" style="margin-top:4px;">Save reminder settings</button>
-      <button class="btn btn-ghost" id="reminderTestBtn" type="button" style="margin-top:8px;">Send me a test now</button>
-      <div id="reminderTestResult" style="font-size:12px;line-height:1.55;margin-top:8px;"></div>
+      <button class="btn btn-ghost" id="reminderTestBtn" type="button" data-admin-only style="margin-top:8px;display:none;">Send me a test now</button>
+      <div id="reminderTestResult" data-admin-only style="font-size:12px;line-height:1.55;margin-top:8px;display:none;"></div>
       <div id="reminderDiag" class="diag-box" aria-live="polite"></div>
     </div>
 
