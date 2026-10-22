@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<meta name="app-version" content="1.15.5">
+<meta name="app-version" content="1.15.6">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -826,6 +826,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div id="lockPasswordPanel">
     <input type="email" id="lockEmailInput" class="lock-input" placeholder="Email" autocomplete="username" style="margin-bottom:8px;">
     <div class="pw-wrap"><input type="password" id="lockPasswordInput" class="lock-input pw-input" placeholder="Password" autocomplete="current-password"><button type="button" class="pw-eye" data-pw-toggle="lockPasswordInput" aria-label="Show password" aria-pressed="false">Show</button></div>
+    <div class="pw-wrap" id="lockConfirmWrap" style="display:none;margin-top:8px;"><input type="password" id="lockConfirmInput" class="lock-input pw-input" placeholder="Confirm password" autocomplete="new-password"><button type="button" class="pw-eye" data-pw-toggle="lockConfirmInput" aria-label="Show password" aria-pressed="false">Show</button></div>
     <button class="btn btn-primary" id="lockSubmitBtn" style="margin-top:10px;">Log in</button>
     <button class="btn btn-ghost" id="lockToggleModeBtn" type="button" style="margin-top:8px;">New here? Create an account</button>
     <div id="turnstileAuthBox" style="margin:10px 0;"></div>
