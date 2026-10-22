@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.15.5';
+window.__APP_VERSION = '1.15.6';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -4577,7 +4577,12 @@ document.querySelectorAll('[data-pw-toggle]').forEach(b=>{
   b.addEventListener('click', ()=>{
     const id = b.getAttribute('data-pw-toggle');
     const inp = document.getElementById(id);
-    setPasswordVisible(id, !(inp && inp.type === 'text'));
+    const makeVisible = !(inp && inp.type === 'text');
+    setPasswordVisible(id, makeVisible);
+    // While creating an account, one button reveals both boxes so they can be compared.
+    if(id === 'lockPasswordInput' || id === 'lockConfirmInput'){
+      if(lockMode === 'signup') setPasswordVisible(id === 'lockPasswordInput' ? 'lockConfirmInput' : 'lockPasswordInput', makeVisible);
+    }
   });
 });
 // Only the app owner sees diagnostics, the self-hosting guide and the test button.
@@ -4607,7 +4612,9 @@ function setLockMode(mode){
     toggleBtn.textContent = 'Already have an account? Log in';
     pwInput.setAttribute('autocomplete', 'new-password');
     pwInput.setAttribute('placeholder', 'Password (at least 6 characters)');
-    setPasswordVisible('lockPasswordInput', true); // visible while creating, so a typo is easy to spot
+    setPasswordVisible('lockPasswordInput', false);
+    setPasswordVisible('lockConfirmInput', false);
+    const cw = document.getElementById('lockConfirmWrap'); if(cw) cw.style.display = '';
     let note = document.getElementById('signupPrivacyNote');
     if(!note){
       note = document.createElement('p');
@@ -4624,6 +4631,7 @@ function setLockMode(mode){
     pwInput.setAttribute('autocomplete', 'current-password');
     pwInput.setAttribute('placeholder', 'Password');
     setPasswordVisible('lockPasswordInput', false);
+    const cw2 = document.getElementById('lockConfirmWrap'); if(cw2){ cw2.style.display = 'none'; setPasswordVisible('lockConfirmInput', false); const ci = document.getElementById('lockConfirmInput'); if(ci) ci.value = ''; }
     const note = document.getElementById('signupPrivacyNote');
     if(note) note.style.display = 'none';
   }
@@ -4778,6 +4786,7 @@ async function doLogin(){
   if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
   if(!pw){ errEl.textContent = 'Enter your password'; return; }
   if(lockMode === 'signup' && pw.length < 6){ errEl.textContent = 'Password must be at least 6 characters'; return; }
+  if(lockMode === 'signup' && pw !== (document.getElementById('lockConfirmInput')?.value || '')){ errEl.textContent = 'The two passwords don\'t match. Use Show to compare them.'; return; }
   if(btn.disabled) return; // a check is already in flight — ignore repeat taps/Enter
   errEl.textContent = '';
   spinner.style.display = '';
@@ -4813,6 +4822,7 @@ async function doLogin(){
         errEl.textContent = '';
         hideLockScreen();
         noteActivity();
+        persistActivity(true);
         loadState();
       } else if(res.ok && data && data.id && !data.access_token){
         // Email confirmation is ON — Supabase created the account but is
@@ -4841,6 +4851,7 @@ async function doLogin(){
         errEl.textContent = '';
         hideLockScreen();
         noteActivity();
+        persistActivity(true);
         loadState();
       } else {
         // Supabase returns error_description / msg / error depending on the
@@ -4881,6 +4892,7 @@ async function doLogin(){
 document.getElementById('lockSubmitBtn').addEventListener('click', doLogin);
 document.getElementById('lockPasswordInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 document.getElementById('lockEmailInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('lockConfirmInput')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 
 async function renderSharesList(){
   const wrap = document.getElementById('sharesList');
@@ -4944,8 +4956,28 @@ function shouldIdleLock(lastActivityAt, now, thresholdMs){
   return (now - lastActivityAt) >= thresholdMs;
 }
 
+// The idle timer above only counts while the app is open. Closing the app (or
+// the phone killing the tab) and reopening it hours later used to restart the
+// timer at zero and walk straight in. So the last-active moment is also saved
+// on the device and checked once at launch.
+const LAST_ACTIVE_KEY = 'budget-cockpit-last-active';
+const PREV_LAST_ACTIVE = (function(){ try{ return Number(localStorage.getItem(LAST_ACTIVE_KEY)) || 0; }catch(e){ return 0; } })();
+let lastActiveWrittenAt = 0, awayGateDone = false;
+function persistActivity(force){
+  const n = Date.now();
+  if(!force && n - lastActiveWrittenAt < 5000) return;
+  lastActiveWrittenAt = n;
+  try{ localStorage.setItem(LAST_ACTIVE_KEY, String(n)); }catch(e){}
+}
+function awayTooLong(){
+  if(awayGateDone) return false;
+  awayGateDone = true;
+  return (Date.now() - PREV_LAST_ACTIVE) >= IDLE_LOCK_MS; // never recorded counts as too long
+}
 let lastActivityAt = Date.now();
-function noteActivity(){ lastActivityAt = Date.now(); }
+function noteActivity(){ lastActivityAt = Date.now(); persistActivity(false); }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden' && sessionToken) persistActivity(true); });
+window.addEventListener('pagehide', ()=>{ if(sessionToken) persistActivity(true); });
 ['mousemove','keydown','touchstart','click','scroll'].forEach(evt=>{
   document.addEventListener(evt, noteActivity, {passive:true});
 });
@@ -5204,7 +5236,9 @@ async function restoreParkedSession(){
   if(!p || !p.refresh){ clearParkedSession(); return false; }
   storeSession({ access_token: p.access, refresh_token: p.refresh, expires_in: Math.max(Math.floor(((p.exp||0) - Date.now())/1000), 1) });
   hideLockScreen();
+  awayGateDone = true;
   noteActivity();
+  persistActivity(true);
   await boot();
   return true;
 }
@@ -5776,6 +5810,10 @@ async function boot(){
   }
 
   if(sessionToken){
+    // Away longer than the lock time: same rule as the idle lock. PIN set means
+    // the PIN screen, biometrics only means a soft lock, otherwise a full
+    // sign-out that needs the password.
+    if(awayTooLong()){ triggerIdleLock(); if(!hasPinSet()) return; }
     // Cached session (and, if offline, a local mirror to boot from) — go
     // straight in. loadState()/apiGet() will call showLockScreen() itself
     // via onSessionInvalid() if the session turns out to be expired once
