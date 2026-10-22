@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.15.4';
+window.__APP_VERSION = '1.15.5';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -492,6 +492,7 @@ function onSessionInvalid(){
 }
 
 async function loadState(){
+  refreshAdminFlag();
   // 1. Load the local mirror first — instant, works fully offline.
   const mirror = loadLocalMirror();
   if(mirror && mirror.state){
@@ -511,7 +512,7 @@ async function loadState(){
         showToast('Backend error: ' + (data.error||'unknown'));
       }
     }catch(e){
-      if(!mirror) showToast('Could not reach backend — showing local data');
+      if(!mirror) showToast('Offline — showing your saved data');
     }
   } else if(!API_URL){
     try{
@@ -4487,6 +4488,7 @@ function ensureTurnstileWidget(containerId){
   if(!el) return;
   const id = turnstile.render('#' + containerId, {
     sitekey: TURNSTILE_SITE_KEY,
+    appearance: 'interaction-only', // stays hidden unless Cloudflare really needs a tap
     callback: (token)=>{ turnstileWidgets[containerId].token = token; },
     'expired-callback': ()=>{ turnstileWidgets[containerId].token = ''; },
     'error-callback': ()=>{ turnstileWidgets[containerId].token = ''; },
@@ -4523,6 +4525,24 @@ function resetTurnstile(containerId){
   if(w && typeof turnstile !== 'undefined') turnstile.reset(w.id);
   if(w) w.token = '';
 }
+
+// Instead of telling people to \"complete the verification\" the moment they tap
+// the button, give the (usually invisible) check a few seconds to finish.
+async function turnstileFieldsReady(containerId){
+  if(!turnstileConfigured()) return {};
+  const t0 = Date.now();
+  while(!turnstileWidgets[containerId] && Date.now() - t0 < 6000){
+    ensureTurnstileWidget(containerId);
+    if(turnstileWidgets[containerId]) break;
+    await new Promise(r=>setTimeout(r, 250));
+  }
+  if(!turnstileWidgets[containerId]) return null;
+  while(!turnstileToken(containerId) && Date.now() - t0 < 14000){
+    await new Promise(r=>setTimeout(r, 250));
+  }
+  return turnstileBodyFields(containerId);
+}
+
 // Builds the extra body fields Supabase's GoTrue expects a CAPTCHA token
 // in (gotrue_meta_security.captcha_token — the same raw shape every
 // official Supabase client library sends). Returns null (meaning "block
@@ -4534,6 +4554,44 @@ function turnstileBodyFields(containerId){
   const token = turnstileToken(containerId);
   if(!token) return null;
   return { gotrue_meta_security: { captcha_token: token } };
+}
+
+
+/* ---------- friendly auth errors, show/hide password, owner flag ---------- */
+function friendlyAuthError(raw, fallback){
+  const s = String(raw || '');
+  if(/rate limit|over_email_send_rate_limit|too many/i.test(s)) return 'Too many emails have been requested in a short time. Please wait a few minutes and try again.';
+  if(/password.*(short|weak|at least)|weak_password/i.test(s)) return 'Choose a longer password (at least 6 characters).';
+  if(/invalid.*email|email_address_invalid|unable to validate email/i.test(s)) return 'That email address doesn\'t look right. Please check it.';
+  if(/signup.*disabled|signups not allowed/i.test(s)) return 'New sign-ups are paused right now. Please try again later.';
+  if(/captcha/i.test(s)) return 'Verification didn\'t go through. Please try again.';
+  return s || fallback;
+}
+function setPasswordVisible(inputId, visible){
+  const inp = document.getElementById(inputId); if(!inp) return;
+  inp.type = visible ? 'text' : 'password';
+  const b = document.querySelector('[data-pw-toggle="' + inputId + '"]');
+  if(b){ b.textContent = visible ? 'Hide' : 'Show'; b.setAttribute('aria-pressed', visible ? 'true' : 'false'); b.setAttribute('aria-label', visible ? 'Hide password' : 'Show password'); }
+}
+document.querySelectorAll('[data-pw-toggle]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    const id = b.getAttribute('data-pw-toggle');
+    const inp = document.getElementById(id);
+    setPasswordVisible(id, !(inp && inp.type === 'text'));
+  });
+});
+// Only the app owner sees diagnostics, the self-hosting guide and the test button.
+window.__isAdmin = false;
+function applyAdminVisibility(){
+  document.querySelectorAll('[data-admin-only]').forEach(el=>{ el.style.display = window.__isAdmin ? '' : 'none'; });
+}
+async function refreshAdminFlag(){
+  if(!sessionToken || !navigator.onLine) return;
+  try{
+    const r = await apiPost('whoami', {});
+    window.__isAdmin = !!(r && r.isAdmin);
+  }catch(e){ window.__isAdmin = false; }
+  applyAdminVisibility();
 }
 
 function setLockMode(mode){
@@ -4549,6 +4607,7 @@ function setLockMode(mode){
     toggleBtn.textContent = 'Already have an account? Log in';
     pwInput.setAttribute('autocomplete', 'new-password');
     pwInput.setAttribute('placeholder', 'Password (at least 6 characters)');
+    setPasswordVisible('lockPasswordInput', true); // visible while creating, so a typo is easy to spot
     let note = document.getElementById('signupPrivacyNote');
     if(!note){
       note = document.createElement('p');
@@ -4564,6 +4623,7 @@ function setLockMode(mode){
     toggleBtn.textContent = "New here? Create an account";
     pwInput.setAttribute('autocomplete', 'current-password');
     pwInput.setAttribute('placeholder', 'Password');
+    setPasswordVisible('lockPasswordInput', false);
     const note = document.getElementById('signupPrivacyNote');
     if(note) note.style.display = 'none';
   }
@@ -4605,10 +4665,10 @@ document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
   const btn = document.getElementById('pwResetSendBtn');
   errEl.textContent = ''; okEl.textContent = '';
   if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errEl.textContent = 'Enter a valid email address'; return; }
-  const captchaFields = turnstileBodyFields('turnstileResetBox');
-  if(captchaFields === null){ errEl.textContent = turnstileBlockMessage('turnstileResetBox'); return; }
   if(btn.disabled) return;
   btn.disabled = true; spinner.style.display = '';
+  const captchaFields = await turnstileFieldsReady('turnstileResetBox');
+  if(captchaFields === null){ errEl.textContent = turnstileBlockMessage('turnstileResetBox'); btn.disabled = false; spinner.style.display = 'none'; return; }
   try{
     const redirectTo = window.location.origin + window.location.pathname;
     const res = await fetchWithTimeout(AUTH_URL + '/recover?redirect_to=' + encodeURIComponent(redirectTo), {
@@ -4625,10 +4685,17 @@ document.getElementById('pwResetSendBtn')?.addEventListener('click', async ()=>{
       okEl.textContent = "If an account exists for that email, a reset link is on its way — check your inbox (and spam folder).";
     } else {
       const data = await res.json().catch(()=>({}));
-      errEl.textContent = (data && (data.error_description || data.msg)) || 'Could not send the reset email — try again shortly.';
+      errEl.textContent = res.status === 429
+        ? friendlyAuthError('rate limit')
+        : friendlyAuthError(data && (data.error_description || data.msg || data.error_code), 'Could not send the reset email. Please try again in a few minutes.');
     }
   }catch(e){
-    errEl.textContent = e.name === 'AbortError' ? 'Request timed out — try again' : 'Could not reach the backend — try again shortly.';
+    console.error('Password reset request failed:', e);
+    errEl.textContent = e.name === 'AbortError'
+      ? 'That took too long. Please try again.'
+      : (navigator.onLine === false
+          ? 'You appear to be offline. Check your connection and try again.'
+          : 'We could not send the reset email just now. If you asked for several emails recently, wait a few minutes and try again.');
   }finally{
     btn.disabled = false; spinner.style.display = 'none';
   }
@@ -4716,7 +4783,7 @@ async function doLogin(){
   spinner.style.display = '';
   checkingText.style.display = '';
   checkingText.textContent = lockMode === 'signup' ? 'Creating your account…' : 'Checking your details…';
-  const captchaFields = turnstileBodyFields('turnstileAuthBox');
+  const captchaFields = await turnstileFieldsReady('turnstileAuthBox');
   if(captchaFields === null){
     errEl.textContent = turnstileBlockMessage('turnstileAuthBox');
     spinner.style.display = 'none'; checkingText.style.display = 'none';
@@ -4758,7 +4825,7 @@ async function doLogin(){
         const raw = (data && (data.error_description || data.msg || data.error_code || data.error)) || '';
         errEl.textContent = /already registered|user already exists/i.test(String(raw))
           ? 'An account already exists for that email — try logging in instead.'
-          : (String(raw) || 'Could not create account');
+          : friendlyAuthError(raw, 'Could not create account. Please try again.');
       }
     } else {
       // Supabase Auth password grant.
@@ -4782,7 +4849,7 @@ async function doLogin(){
         const raw = (data && (data.error_description || data.msg || data.error_code || data.error)) || '';
         errEl.textContent = /invalid login|invalid_grant|credentials|email not confirmed/i.test(String(raw))
           ? (/not confirmed/i.test(String(raw)) ? 'Check your email for the confirmation link first' : 'Incorrect email or password')
-          : (String(raw) || 'Could not sign in');
+          : friendlyAuthError(raw, 'Could not sign in. Please try again.');
       }
     }
   }catch(e){
@@ -4800,7 +4867,7 @@ async function doLogin(){
       // privacy/ad-block extension blocking the request outright. Naming
       // both directly beats a generic "check your connection" that sends
       // someone checking their Wi-Fi for a problem that was never there.
-      errEl.innerHTML = "Can't reach the backend. If your internet is fine, the most likely cause is the Supabase project is paused (free-tier projects pause after inactivity — resume it from the Supabase dashboard) or a browser extension is blocking the request. <a href=\"#\" id=\"lockRetryLink\" style=\"color:var(--gold);\">Try again</a>";
+      errEl.innerHTML = "We couldn't connect just now. Check your internet connection and <a href=\"#\" id=\"lockRetryLink\" style=\"color:var(--gold);\">try again</a>.";
       const retryLink = document.getElementById('lockRetryLink');
       if(retryLink) retryLink.addEventListener('click', (ev)=>{ ev.preventDefault(); doLogin(); });
     }
@@ -5361,6 +5428,7 @@ async function loadReminderStatus(){
   if(!box || !navigator.onLine || !sessionToken) return;
   let st; try{ st = await apiPost('reminderStatus', {}); }catch(e){ return; }
   if(!st || st.error) return;
+  window.__isAdmin = !!st.isAdmin; applyAdminVisibility();
   const local = await localPushState();
   const L = [];
   const ok = t=>L.push('<div class="diag ok">✓ ' + t + '</div>');
@@ -5374,16 +5442,18 @@ async function loadReminderStatus(){
     else if(local === 'denied') bad('Notifications are blocked for this site in your browser settings');
     else if(local === 'not-subscribed') bad('This device isn\'t subscribed yet — tap "Allow push notifications" (Save does this too)');
     else if(local === 'subscribed') ok('This device is subscribed to push');
-    if(!st.vapidConfigured) bad('The app\'s server has no push keys set, so push can\'t be sent (the app owner must add the VAPID keys)');
+    if(!window.__isAdmin){ /* server-side push setup is the app owner's concern */ }
+    else if(!st.vapidConfigured) bad('The app\'s server has no push keys set, so push can\'t be sent (the app owner must add the VAPID keys)');
     else if(!st.pushCount) bad('The server has no saved push device for you yet');
-    else ok('The server has ' + st.pushCount + ' push device' + (st.pushCount === 1 ? '' : 's') + ' saved for you');
+    else if(window.__isAdmin) ok('The server has ' + st.pushCount + ' push device' + (st.pushCount === 1 ? '' : 's') + ' saved for you');
   }
   if(chans.includes('email')){
-    if(!st.email) bad('No email address saved — add one under "Reports email" in Settings');
-    else ok('Email reminders go to ' + escapeHtml(maskEmail(st.email)));
-    if(!st.emailConfigured) bad('Email sending isn\'t set up on the server (the app owner must add the email key)');
+    if(!st.email) bad('We couldn\'t find the email you signed up with');
+    else ok('Email reminders go to the email you signed up with, ' +  + escapeHtml(maskEmail(st.email)));
+    if(window.__isAdmin && !st.emailConfigured) bad('Email sending isn\'t set up on the server (the app owner must add the email key)');
   }
-  if(st.schedulerAgeMinutes == null) bad('The timed scheduler has never run — the app owner needs to run cron.sql (with the real secret) to switch on timed reminders');
+  if(!window.__isAdmin){ /* scheduler health is the app owner's concern */ }
+  else if(st.schedulerAgeMinutes == null) bad('The timed scheduler has never run — the app owner needs to run cron.sql (with the real secret) to switch on timed reminders');
   else if(st.schedulerAgeMinutes > 30) bad('The timed scheduler last ran ' + st.schedulerAgeMinutes + ' minutes ago — it should run every 10 minutes');
   else ok('The timed scheduler is running (last tick ' + st.schedulerAgeMinutes + ' min ago)');
   if(st.loggedToday) info('You\'ve already logged an expense today, so no reminder will be sent today');
