@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.15.6';
+window.__APP_VERSION = '1.16.0';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -484,6 +484,7 @@ function onSessionInvalid(){
   clearSession();
   clearParkedSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  try{ hhWipeLocal(); }catch(e){}
   // Same reasoning as lockNow() — an expired/invalidated session shouldn't
   // leave the previous session's full financial data sitting in the DOM or
   // in the local mirror, inspectable by whoever's at the device next.
@@ -493,6 +494,7 @@ function onSessionInvalid(){
 
 async function loadState(){
   refreshAdminFlag();
+  hhInit();
   // 1. Load the local mirror first — instant, works fully offline.
   const mirror = loadLocalMirror();
   if(mirror && mirror.state){
@@ -1844,6 +1846,11 @@ function deleteTxWithUndo(t){
   });
 }
 
+function hhChipHtml(t){
+  if(!hhOn()) return '';
+  const m = hhMemberOf(t); if(!m) return '';
+  return '<span class="hh-chip" style="--c:' + hhColor(m.color) + ';">' + escapeHtml(m.name) + '</span>';
+}
 function renderTxRow(container, t, showDelete){
   const cat = catById(t.categoryId);
   const savingsTag = cat && cat.group==='Savings' ? '<span class="tx-tag-savings">SAVINGS</span>' : '';
@@ -1856,7 +1863,7 @@ function renderTxRow(container, t, showDelete){
     <div class="tx-row">
       <div class="tx-left">
         <div class="tx-cat">${cat && cat.icon ? escapeHtml(cat.icon)+' ' : ''}${escapeHtml(cat?cat.name:'Uncategorized')}${savingsTag}${recurTag}</div>
-        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}</div>
+        <div class="tx-desc">${escapeHtml(t.desc)||'—'}${methodTag}${hhChipHtml(t)}</div>
       </div>
       <div class="tx-right">
         <div class="tx-amt-chip"><span class="tx-amt">${fmt(t.amount)}</span></div>
@@ -3035,6 +3042,7 @@ function renderAll(){
   safeRender(renderLoanTab);
   safeRender(renderHistory);
   safeRender(renderSettings);
+  safeRender(hhRender);
   const sel = document.getElementById('txCategory');
   if(sel) sel.innerHTML = state.categories.map(c=>`<option value="${c.id}">${c.icon?escapeHtml(c.icon)+' ':''}${escapeHtml(c.name)}${c.group==='Savings'?' (savings)':''}</option>`).join('');
 }
@@ -3186,6 +3194,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   document.getElementById('txRecurring').checked = false;
   refreshDebtLinkField();
   refreshLoanLinkField();
+  hhPrepareSheet(null);
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -3201,6 +3210,7 @@ function openEditTx(t){
   document.getElementById('txRecurring').checked = t.recurTemplateId != null;
   refreshDebtLinkField(t.debtId);
   refreshLoanLinkField(t);
+  hhPrepareSheet(t);
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -3280,6 +3290,7 @@ document.getElementById('txSaveBtn').addEventListener('click', ()=>{
     }
   }
 
+  if(t) hhOnTxSaved(t);
   saveState(); renderAll();
 
   // Quick visual feedback on how this expense landed in its category —
@@ -3746,6 +3757,7 @@ function generateReportText(d, periodLabel, note){
   L.push(thin);
   L.push(padR('Balance remaining', 40) + padL(fmtInc(d.remaining), 26));
   L.push('');
+  try{ hhReportLines(d).forEach(x=>L.push(x)); }catch(e){}
 
   const items = (d.txs||[]).slice().sort((a,b)=> String(a.date||'').localeCompare(String(b.date||'')) || String(a.id).localeCompare(String(b.id)));
   L.push('TRANSACTION DETAIL (' + items.length + (items.length===1?' entry':' entries') + ')');
@@ -4531,13 +4543,14 @@ function resetTurnstile(containerId){
 async function turnstileFieldsReady(containerId){
   if(!turnstileConfigured()) return {};
   const t0 = Date.now();
-  while(!turnstileWidgets[containerId] && Date.now() - t0 < 6000){
+  const maxWait = (typeof window.__turnstileWaitMs === 'number') ? window.__turnstileWaitMs : 14000; // tests shorten this
+  while(!turnstileWidgets[containerId] && Date.now() - t0 < Math.min(6000, maxWait)){
     ensureTurnstileWidget(containerId);
     if(turnstileWidgets[containerId]) break;
     await new Promise(r=>setTimeout(r, 250));
   }
   if(!turnstileWidgets[containerId]) return null;
-  while(!turnstileToken(containerId) && Date.now() - t0 < 14000){
+  while(!turnstileToken(containerId) && Date.now() - t0 < maxWait){
     await new Promise(r=>setTimeout(r, 250));
   }
   return turnstileBodyFields(containerId);
@@ -5173,6 +5186,7 @@ function lockNow(){
   clearSession();
   clearParkedSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  try{ hhWipeLocal(); }catch(e){}
   // A reload (not just showLockScreen()) is deliberate: the lock screen is
   // a CSS overlay, not a teardown — the fully-rendered DOM underneath (every
   // transaction, balance, category) would otherwise still be sitting there,
@@ -5250,6 +5264,7 @@ function discardParkedSession(){
   }
   clearParkedSession();
   try{ localStorage.removeItem(LOCAL_MIRROR_KEY); }catch(e){}
+  try{ hhWipeLocal(); }catch(e){}
 }
 
 let lockMethod = 'password';
@@ -5483,7 +5498,7 @@ async function loadReminderStatus(){
   }
   if(chans.includes('email')){
     if(!st.email) bad('We couldn\'t find the email you signed up with');
-    else ok('Email reminders go to the email you signed up with, ' +  + escapeHtml(maskEmail(st.email)));
+    else ok('Email reminders go to the email you signed up with, ' + escapeHtml(maskEmail(st.email)));
     if(window.__isAdmin && !st.emailConfigured) bad('Email sending isn\'t set up on the server (the app owner must add the email key)');
   }
   if(!window.__isAdmin){ /* scheduler health is the app owner's concern */ }
@@ -5651,6 +5666,7 @@ const TOUR_STEPS = [
   { sel:'.nav-btn[data-view="history"]', view:'dashboard', title:'History', text:'Look back at past pay cycles, charts, and every transaction in the current one.' },
   { sel:'.nav-btn[data-view="guide"]', view:'dashboard', title:'Guide', text:'Answers to common questions, and this tour whenever you want to see it again.' },
   { sel:'.nav-btn[data-view="settings"]', view:'dashboard', title:'Settings — start here', text:'Set your income and how you\'re paid (salary or wages), category budgets, a PIN or fingerprint login, daily reminders and reports. Set your income first and everything else fills in.' },
+  { sel:'#householdSettingsCard', view:'settings', title:'Budgeting for a household? 🏡', text:'Switch on Household budget here to add the people you share money with. Then every expense asks who spent it, the Dashboard shows spending by person, and one tap adds categories like school fees and generator fuel. It is still one budget on one login.' },
   { title:'You\'re all set 🎉', text:'Start by opening Settings to enter your income, then log your first expense with the + button.', view:'dashboard' },
 ];
 let tourIdx = 0, tourActive = false, tourChecked = false;
@@ -5831,6 +5847,260 @@ async function boot(){
   try{ pendingLockMsg = sessionStorage.getItem('pendingLockMessage') || ''; sessionStorage.removeItem('pendingLockMessage'); }catch(e){}
   showLockScreen(pendingLockMsg);
 }
+/* =====================================================================
+   HOUSEHOLD BUDGET (option 1: one account, several people as labels)
+   Kept apart from the main state on purpose: it has its own local store,
+   its own server calls and its own tables, so it can never disturb the
+   budget data, the conflict merge or the debt/loan operations.
+   Tags are stored as { transactionId: memberId } and { 'rt:<templateId>':
+   memberId } so recurring expenses keep their person every cycle.
+   ===================================================================== */
+const HH_PREFIX = 'budget-cockpit-household-';
+const HH_COLORS = ['#FFC24D','#4FA3D1','#E07A5F','#81B29A','#B08FD8','#F2A65A','#5CC8C0','#D86C9A'];
+const HH_MAX_PEOPLE = 12;
+const HH_PRESET = [
+  {id:'school-fees', name:'School fees', group:'Needs', icon:'🎓', alt:['school','tuition']},
+  {id:'children', name:"Children's needs", group:'Needs', icon:'🧒', alt:['children','kids']},
+  {id:'generator-fuel', name:'Generator / power fuel', group:'Needs', icon:'⛽', alt:['generator','fuel','diesel','petrol']},
+  {id:'household-supplies', name:'Household supplies', group:'Needs', icon:'🧺', alt:['household','supplies','toiletries']},
+  {id:'water', name:'Water & waste', group:'Needs', icon:'💧', alt:['water','waste']},
+  {id:'domestic-help', name:'Domestic help', group:'Needs', icon:'🧹', alt:['domestic','housekeeper','nanny','cleaner']},
+  {id:'home-repairs', name:'Home repairs', group:'Needs', icon:'🔧', alt:['repair','maintenance']},
+  {id:'church-giving', name:'Church / giving', group:'Wants', icon:'🙏', alt:['church','tithe','offering','giving']}
+];
+var hh = { enabled:false, name:'My household', members:[], tags:{}, version:0, dirty:false, lastMember:'', syncOk:true, pulled:false };
+var hhPicked = '', hhSyncTimer = null, hhPushing = false;
+
+function hhUserSub(){ return tourUserKey().replace('budget-cockpit-tour-done-',''); }
+function hhKey(){ return HH_PREFIX + hhUserSub(); }
+function hhLoadLocal(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(hhKey()) || 'null');
+    if(raw && typeof raw === 'object'){
+      hh = Object.assign({ enabled:false, name:'My household', members:[], tags:{}, version:0, dirty:false, lastMember:'', syncOk:true, pulled:false }, raw);
+      if(!Array.isArray(hh.members)) hh.members = [];
+      if(!hh.tags || typeof hh.tags !== 'object') hh.tags = {};
+    }
+  }catch(e){}
+}
+function hhSaveLocal(){ try{ localStorage.setItem(hhKey(), JSON.stringify(hh)); }catch(e){} }
+function hhWipeLocal(){
+  try{ Object.keys(localStorage).filter(k=>k.indexOf(HH_PREFIX) === 0).forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  hh = { enabled:false, name:'My household', members:[], tags:{}, version:0, dirty:false, lastMember:'', syncOk:true, pulled:false };
+}
+function hhActiveMembers(){ return (hh ? hh.members : []).filter(m=>!m.archived); }
+function hhMember(id){ return hh.members.find(m=>m.id === id) || null; }
+function hhOn(){ return !!(hh && hh.enabled && hhActiveMembers().length >= 2); }
+function hhColor(c){ return /^#[0-9a-fA-F]{6}$/.test(c || '') ? c : HH_COLORS[0]; }
+function hhMemberOf(t){
+  if(!t) return null;
+  const id = hh.tags[t.id] || (t.recurTemplateId && hh.tags['rt:' + t.recurTemplateId]) || '';
+  return id ? hhMember(id) : null;
+}
+function hhChange(){
+  hh.dirty = true; hhSaveLocal();
+  clearTimeout(hhSyncTimer); hhSyncTimer = setTimeout(hhPush, 1200);
+}
+function hhSetTag(t, memberId){
+  if(memberId){ hh.tags[t.id] = memberId; if(t.recurTemplateId) hh.tags['rt:' + t.recurTemplateId] = memberId; }
+  else { delete hh.tags[t.id]; if(t.recurTemplateId) delete hh.tags['rt:' + t.recurTemplateId]; }
+  hhChange();
+}
+function hhEnsureOwner(){
+  if(!hh.members.some(m=>m.isOwner)){
+    hh.members.unshift({ id:'m-me', name:'Me', color:HH_COLORS[0], isOwner:true, archived:false });
+  }
+}
+
+/* ---- add / edit expense sheet ---- */
+function hhRenderChips(){
+  const box = document.getElementById('txMemberChips'); if(!box) return;
+  box.innerHTML = hhActiveMembers().map(m=>'<button type="button" class="hh-pick' + (m.id === hhPicked ? ' on' : '') + '" data-m="' + escapeHtml(m.id) + '" style="--c:' + hhColor(m.color) + ';"><span class="hh-dot"></span>' + escapeHtml(m.name) + '</button>').join('');
+}
+function hhPrepareSheet(t){
+  const f = document.getElementById('txMemberField'); if(!f) return;
+  if(!hhOn()){ f.style.display = 'none'; hhPicked = ''; return; }
+  f.style.display = '';
+  const ms = hhActiveMembers();
+  if(t){ const m = hhMemberOf(t); hhPicked = m && !m.archived ? m.id : ''; }
+  else { hhPicked = ms.some(m=>m.id === hh.lastMember) ? hh.lastMember : (ms.find(m=>m.isOwner) || ms[0]).id; }
+  hhRenderChips();
+}
+document.getElementById('txMemberChips')?.addEventListener('click', e=>{
+  const b = e.target.closest('.hh-pick'); if(!b) return;
+  hhPicked = b.getAttribute('data-m'); hhRenderChips();
+});
+function hhOnTxSaved(t){
+  if(!hhOn()) return;
+  hhSetTag(t, hhPicked);
+  if(hhPicked){ hh.lastMember = hhPicked; hhSaveLocal(); }
+}
+
+/* ---- numbers ---- */
+function hhTotals(txs){
+  const out = { total:0, by:{}, none:{ total:0, cats:{} } };
+  (txs || []).forEach(t=>{
+    if(isSavingsCat(t.categoryId)) return;
+    const amt = Number(t.amount) || 0; if(!amt) return;
+    const m = hhMemberOf(t);
+    const slot = m ? (out.by[m.id] = out.by[m.id] || { total:0, cats:{} }) : out.none;
+    slot.total += amt; slot.cats[t.categoryId] = (slot.cats[t.categoryId] || 0) + amt;
+    out.total += amt;
+  });
+  return out;
+}
+function hhTopCat(slot){
+  let best = '', bestAmt = 0;
+  Object.keys(slot.cats).forEach(c=>{ if(slot.cats[c] > bestAmt){ best = c; bestAmt = slot.cats[c]; } });
+  const cat = best ? catById(best) : null;
+  return cat ? cat.name : '';
+}
+function hhReportLines(d){
+  if(!hhOn()) return [];
+  const tot = hhTotals(d.txs); if(!tot.total) return [];
+  const thin = '-'.repeat(70), L = ['SPENDING BY PERSON' + (hh.name ? ' (' + hh.name + ')' : ''), thin];
+  hh.members.forEach(m=>{
+    const s = tot.by[m.id]; if(!s) return;
+    L.push(padR(m.name + (m.archived ? ' (no longer active)' : ''), 40) + padL(fmt(s.total) + ' (' + Math.round(s.total / tot.total * 100) + '%)', 30));
+  });
+  if(tot.none.total) L.push(padR('Not assigned', 40) + padL(fmt(tot.none.total) + ' (' + Math.round(tot.none.total / tot.total * 100) + '%)', 30));
+  L.push('');
+  return L;
+}
+
+/* ---- dashboard card ---- */
+function hhRenderCard(){
+  const sec = document.getElementById('hhSection'), card = document.getElementById('householdCard');
+  if(!sec || !card) return;
+  const tot = hhOn() ? hhTotals(state.transactions) : null;
+  if(!tot || !tot.total){ sec.style.display = 'none'; card.style.display = 'none'; return; }
+  sec.style.display = ''; card.style.display = '';
+  const rows = [];
+  hh.members.forEach(m=>{ const s = tot.by[m.id]; if(s) rows.push({ name:m.name, color:hhColor(m.color), s }); });
+  if(tot.none.total) rows.push({ name:'Not assigned', color:'#7B8494', s:tot.none });
+  rows.sort((a,b)=>b.s.total - a.s.total);
+  card.innerHTML = rows.map(r=>{
+    const pct = Math.round(r.s.total / tot.total * 100), top = hhTopCat(r.s);
+    return '<div class="hh-person"><div class="hh-row"><span class="hh-dot" style="--c:' + r.color + ';"></span><b>' + escapeHtml(r.name) + '</b><span>' + fmt(r.s.total) + '</span></div>'
+      + '<div class="hh-bar"><i style="width:' + pct + '%;background:' + r.color + ';"></i></div>'
+      + '<div class="hh-sub">' + pct + '% of household spending' + (top ? ' · mostly ' + escapeHtml(top) : '') + '</div></div>';
+  }).join('') + '<div class="hh-sub">This cycle, savings excluded.</div>';
+}
+
+/* ---- settings ---- */
+function hhSyncNoteText(){
+  if(!navigator.onLine) return 'You are offline. Changes are kept on this device and will sync when you are back online.';
+  if(hh.dirty) return 'Saving…';
+  if(!hh.syncOk) return window.__isAdmin ? 'Saved on this device only. Run household_schema.sql in Supabase and deploy the latest index.ts to sync across devices.' : 'Saved on this device. Syncing across your devices isn\'t available right now.';
+  return 'Saved and synced across your devices.';
+}
+function hhRenderSettings(){
+  const en = document.getElementById('hhEnable'); if(!en) return;
+  en.checked = !!hh.enabled;
+  const panel = document.getElementById('hhPanel'); panel.style.display = hh.enabled ? '' : 'none';
+  if(!hh.enabled) return;
+  const nm = document.getElementById('hhName'); if(document.activeElement !== nm) nm.value = hh.name || '';
+  const list = document.getElementById('hhMemberList');
+  const act = hhActiveMembers();
+  list.innerHTML = act.map(m=>'<div class="hh-member" data-id="' + escapeHtml(m.id) + '"><button type="button" class="hh-dotbtn" data-act="color" aria-label="Change colour"><span class="hh-dot" style="--c:' + hhColor(m.color) + ';"></span></button>'
+    + '<input type="text" class="hh-name" value="' + escapeHtml(m.name) + '" maxlength="40" aria-label="Name">'
+    + (m.isOwner ? '' : '<button type="button" class="hh-x" data-act="remove" aria-label="Remove">✕</button>') + '</div>').join('');
+  const add = document.getElementById('hhAddMember');
+  add.disabled = act.length >= HH_MAX_PEOPLE;
+  const note = document.getElementById('hhSyncNote');
+  note.textContent = (act.length < 2 ? 'Add at least one more person to start tagging who spent what. ' : '') + hhSyncNoteText();
+}
+function hhRender(){ hhRenderSettings(); hhRenderCard(); }
+
+document.getElementById('hhEnable')?.addEventListener('change', e=>{
+  hh.enabled = e.target.checked;
+  if(hh.enabled) hhEnsureOwner();
+  hhChange(); renderAll();
+  showToast(hh.enabled ? 'Household budget on. Add the people you share money with.' : 'Household budget off. Your data is kept.');
+});
+document.getElementById('hhName')?.addEventListener('change', e=>{ hh.name = e.target.value.trim().slice(0,60) || 'My household'; hhChange(); });
+function hhAddPerson(){
+  const inp = document.getElementById('hhNewMember'); const name = inp.value.trim().slice(0,40);
+  if(!name){ showToast('Type a name first'); return; }
+  if(hhActiveMembers().length >= HH_MAX_PEOPLE){ showToast('That is the most people one household can hold'); return; }
+  if(hhActiveMembers().some(m=>m.name.toLowerCase() === name.toLowerCase())){ showToast('Someone with that name is already added'); return; }
+  const used = hh.members.length;
+  hh.members.push({ id:uniqueId('m'), name, color:HH_COLORS[used % HH_COLORS.length], isOwner:false, archived:false });
+  inp.value = ''; hhChange(); renderAll();
+}
+document.getElementById('hhAddMember')?.addEventListener('click', hhAddPerson);
+document.getElementById('hhNewMember')?.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); hhAddPerson(); } });
+document.getElementById('hhMemberList')?.addEventListener('click', e=>{
+  const row = e.target.closest('.hh-member'); if(!row) return;
+  const m = hhMember(row.getAttribute('data-id')); if(!m) return;
+  const act = e.target.closest('[data-act]'); if(!act) return;
+  if(act.getAttribute('data-act') === 'color'){
+    const i = HH_COLORS.indexOf(hhColor(m.color)); m.color = HH_COLORS[(i + 1) % HH_COLORS.length]; hhChange(); renderAll();
+  } else if(act.getAttribute('data-act') === 'remove'){
+    if(!confirm('Remove ' + m.name + '? Their past spending stays in your reports. They just stop appearing for new expenses.')) return;
+    m.archived = true; hhChange(); renderAll();
+  }
+});
+document.getElementById('hhMemberList')?.addEventListener('change', e=>{
+  if(!e.target.classList.contains('hh-name')) return;
+  const m = hhMember(e.target.closest('.hh-member').getAttribute('data-id')); if(!m) return;
+  const v = e.target.value.trim().slice(0,40);
+  if(v){ m.name = v; hhChange(); renderAll(); } else { e.target.value = m.name; }
+});
+document.getElementById('hhPresetBtn')?.addEventListener('click', ()=>{
+  const have = state.categories.map(c=>(c.name || '').toLowerCase() + ' ' + c.id.toLowerCase());
+  let added = 0;
+  HH_PRESET.forEach(p=>{
+    const exists = catById(p.id) || have.some(s=>p.alt.some(a=>s.indexOf(a) !== -1));
+    if(exists) return;
+    state.categories.push({ id:p.id, name:p.name, group:p.group, budget:0, threshold:p.group === 'Needs' ? 0.9 : 0.85, icon:p.icon });
+    added++;
+  });
+  if(added){ saveState(); renderAll(); showToast(added + ' household ' + (added === 1 ? 'category' : 'categories') + ' added. Set their budgets below.'); }
+  else showToast('You already have all the household categories');
+});
+
+/* ---- sync (separate from the main state) ---- */
+function hhPayload(){ return { enabled:hh.enabled, name:hh.name, members:hh.members, tags:hh.tags }; }
+function hhMerge(server){
+  // Both devices changed it: keep everyone, local edits win for the same person or expense.
+  const ids = new Set(hh.members.map(m=>m.id));
+  (server.members || []).forEach(m=>{ if(!ids.has(m.id)) hh.members.push(m); });
+  hh.tags = Object.assign({}, server.tags || {}, hh.tags);
+  hh.version = Number(server.version) || hh.version;
+}
+async function hhPush(){
+  if(hhPushing || !hh.dirty) return;
+  if(!navigator.onLine || !sessionToken){ hhRenderSettings(); return; }
+  hhPushing = true;
+  try{
+    for(let attempt = 0; attempt < 2; attempt++){
+      const r = await apiPost('householdSave', { state:hhPayload(), baseVersion:hh.version });
+      if(r && r.conflict){ hhMerge(r.state || {}); continue; }
+      if(r && r.ok){ hh.version = Number(r.version) || hh.version; hh.dirty = false; hh.syncOk = true; break; }
+      hh.syncOk = false; break;
+    }
+  }catch(e){ hh.syncOk = false; }
+  hhPushing = false; hhSaveLocal(); hhRender();
+}
+async function hhPull(){
+  if(!navigator.onLine || !sessionToken) return;
+  try{
+    const r = await apiPost('householdGet', {});
+    if(!r || r.error){ hh.syncOk = false; hhRender(); return; }
+    hh.syncOk = true;
+    if(r.exists){
+      if(hh.dirty) hhMerge(r);
+      else Object.assign(hh, { enabled:!!r.enabled, name:r.name || 'My household', members:r.members || [], tags:r.tags || {}, version:Number(r.version) || 0 });
+    }
+    hh.pulled = true; hhSaveLocal();
+    if(hh.dirty) hhPush();
+  }catch(e){ hh.syncOk = false; }
+  renderAll();
+}
+function hhInit(){ hhLoadLocal(); hhRender(); hhPull(); }
+window.addEventListener('online', ()=>{ if(sessionToken && hh.dirty) hhPush(); });
+
 boot().catch(e=>{
   console.error('boot failed', e);
   if(window.__bootFail) window.__bootFail('Startup error: ' + (e && e.message ? e.message : e));
