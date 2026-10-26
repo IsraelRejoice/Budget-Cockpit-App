@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<meta name="app-version" content="1.15.6">
+<meta name="app-version" content="1.16.0">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -680,6 +680,24 @@ body{min-height:100vh; padding-bottom:92px;}
 .lock-input{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
   color:var(--text);font-family:'Inter',sans-serif;font-size:16px;padding:14px 16px;text-align:center;}
 .lock-input:focus{outline:none;border-color:var(--gold);}
+/* ---- household budget ---- */
+.hh-chip{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:10px;font-weight:600;color:#0B0E13;background:var(--c,#FFC24D);vertical-align:1px;}
+.hh-chips{display:flex;flex-wrap:wrap;gap:8px;}
+.hh-pick{border:1px solid var(--line);background:var(--panel-2);color:var(--text);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+.hh-pick .hh-dot{width:10px;height:10px;}
+.hh-pick.on{border-color:var(--gold);background:var(--panel);box-shadow:0 0 0 1px var(--gold) inset;}
+.hh-dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--c,#FFC24D);flex:none;}
+.hh-person{margin-bottom:14px;}
+.hh-row{display:flex;align-items:center;gap:8px;font-size:14px;}
+.hh-row b{flex:1;font-weight:600;}
+.hh-bar{height:6px;border-radius:6px;background:var(--panel-2);margin:6px 0 3px;overflow:hidden;}
+.hh-bar i{display:block;height:100%;border-radius:6px;}
+.hh-sub{font-size:11px;color:var(--muted);}
+.hh-member{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.hh-member input{flex:1;min-width:0;margin:0;}
+.hh-dotbtn{background:none;border:0;padding:8px;cursor:pointer;}
+.hh-x{background:none;border:0;color:var(--muted);font-size:16px;padding:8px;cursor:pointer;}
+.hh-note{font-size:11px;color:var(--muted);line-height:1.5;margin:8px 0 0;}
 .pw-wrap{position:relative;}
 .pw-input{padding-right:64px !important;}
 .pw-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--gold);font-size:12px;font-weight:600;padding:8px 10px;cursor:pointer;border-radius:8px;}
@@ -1033,6 +1051,9 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div class="section"><h2>Spending categories</h2><span class="tag" id="catTag">0 tracked</span></div>
     <div class="cat-list" id="catList"></div>
 
+    <div class="section" id="hhSection" style="display:none;"><h2>Spending by person</h2></div>
+    <div id="householdCard" style="display:none;margin:0 20px 20px;"></div>
+
     <div class="section"><h2>Recent activity</h2><span class="tag" id="txTag"></span></div>
     <div class="tx-list" id="txListPreview"></div>
   </div>
@@ -1250,6 +1271,18 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
         <div class="faq-a">It’s a quick bot check (Cloudflare Turnstile) on sign-in, sign-up and password reset that keeps automated scripts out. If it never appears, an ad or content blocker may be hiding it — allow challenges.cloudflare.com or try another browser.</div></div>
       <div class="faq-item"><div class="faq-q">How do daily reminders work?</div>
         <div class="faq-a">Settings → Daily reminder: switch it on, pick a time (24-hour, e.g. 20:30) and choose push notification, email or both. If you haven’t logged anything that day by then, you get a nudge to log an expense; on days you’ve already logged something, no reminder is sent. Push needs your permission on each device (tap “Allow push notifications”); email goes to the report email address saved in Settings (so make sure one is set). Not getting them? Tap <b>Send me a test now</b> in the same section — it sends a real test and the checklist below it shows exactly what’s missing (a push permission, a saved email, or something on the app’s server). On an iPhone, push only works once the app is added to your Home Screen.</div></div>
+    </div>
+
+    <div class="guide-block">
+      <h3>Household budgeting</h3>
+      <div class="faq-item"><div class="faq-q">Can I use this for my whole household?</div>
+        <div class="faq-a">Yes. Settings → Household budget → switch it on, then add the people you share money with (a spouse, children, a relative). When you log an expense you pick who spent it, and the Dashboard shows spending by person. It is one budget on one login: the people you add are labels, not separate accounts.</div></div>
+      <div class="faq-item"><div class="faq-q">What are household categories?</div>
+        <div class="faq-a">“Add household categories” adds common ones that are missing, such as school fees, generator fuel, domestic help, church giving, children’s needs and home repairs. Nothing you already have is changed or duplicated, and you can rename or delete any of them.</div></div>
+      <div class="faq-item"><div class="faq-q">Do other people log in to my budget?</div>
+        <div class="faq-a">Not yet. Everyone shares the one login, or you log their spending for them. Each person who wants a private budget of their own can create their own free account, because every account is separate.</div></div>
+      <div class="faq-item"><div class="faq-q">What happens to old expenses, and if I remove someone?</div>
+        <div class="faq-a">Expenses logged before you turned this on stay as “Not assigned”. Open one and tap Edit to give it a person. Removing a person hides them from new entries but keeps their past spending in your reports. Turning the switch off keeps everything, so you can turn it back on later.</div></div>
     </div>
 
     <div class="guide-block">
@@ -1498,6 +1531,22 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
       <button class="btn btn-ghost" id="syncBackupDismissBtn" style="color:var(--muted);">Dismiss</button>
     </div>
 
+    <div id="householdSettingsCard">
+    <div class="section"><h2>Household budget</h2></div>
+    <div style="margin:0 20px 20px;">
+      <p class="hh-note" style="margin:0 0 12px;font-size:12px;">Budgeting for a home, not just yourself? Switch this on to add the people you share money with, see who spent what, and get household categories like school fees and generator fuel. It is still one budget on one login. People you add are labels, not accounts.</p>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;margin:0 0 12px;cursor:pointer;"><input type="checkbox" id="hhEnable" style="width:auto;margin:0;"> Use Budget Cockpit as a household budget</label>
+      <div id="hhPanel" style="display:none;">
+        <div class="field"><label>Household name</label><input type="text" id="hhName" maxlength="60" placeholder="e.g. The Adeyemi home"></div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin:4px 0 8px;">People in this household</label>
+        <div id="hhMemberList"></div>
+        <div style="display:flex;gap:8px;margin:6px 0 12px;"><input type="text" id="hhNewMember" maxlength="40" placeholder="Add a person, e.g. Tola" style="flex:1;margin:0;"><button class="btn btn-ghost" id="hhAddMember" type="button" style="width:auto;margin:0;">Add</button></div>
+        <button class="btn btn-ghost" id="hhPresetBtn" type="button">Add household categories</button>
+        <p class="hh-note" id="hhSyncNote"></p>
+      </div>
+    </div>
+    </div>
+
     <div class="section"><h2>Daily reminder</h2></div>
     <div style="margin:0 20px 20px;">
       <p style="font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 14px;">
@@ -1623,6 +1672,10 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
   <div class="field">
     <label>Category</label>
     <select id="txCategory"></select>
+  </div>
+  <div class="field" id="txMemberField" style="display:none;">
+    <label>Who spent it?</label>
+    <div class="hh-chips" id="txMemberChips"></div>
   </div>
   <div class="field" id="txDebtLinkField" style="display:none;">
     <label>Which debt is this for?</label>
