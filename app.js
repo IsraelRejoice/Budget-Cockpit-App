@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.16.0';
+window.__APP_VERSION = '1.16.2';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -594,6 +594,7 @@ async function loadState(){
   flushLoanDebtOps(); // same idea, for any loan/debt add/delete that didn't reach the backend yet
   maybeStartTour();
   maybeShowLotusHint();
+  setTimeout(maybeShowLoanDuePopup, 3800);
 }
 
 // Loans and Debts are persisted via small atomic add/delete calls (see
@@ -809,7 +810,8 @@ function fmt(n){
   n = Math.round(n||0);
   const sym = state.currency || '₦';
   if(privacyMode) return sym + '••••'; // fixed-length mask — doesn't leak magnitude via digit count
-  return sym + symSep(sym) + n.toLocaleString('en-NG');
+  // A negative figure (spending past zero) reads as -₦1,000, not ₦-1,000.
+  return (n < 0 ? '-' : '') + sym + symSep(sym) + Math.abs(n).toLocaleString('en-NG');
 }
 function catById(id){ return state.categories.find(c=>c.id===id); }
 function isSavingsCat(id){ const c = catById(id); return !!(c && c.group==='Savings'); }
@@ -1379,11 +1381,40 @@ function cycleLabelText(){
   return last.toLocaleDateString('en-GB',opts) + ' – ' + next.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 }
 
+// Balance count-up: the number eases from its old value to the new one.
+let heroShown = null, heroAnimRaf = 0;
+function setHeroBalance(v){
+  const el = document.getElementById('safeToday');
+  if(!el) return;
+  const card = el.closest('.hero-card');
+  if(card) card.classList.toggle('hero-neg', v < 0);
+  const calm = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || typeof requestAnimationFrame !== 'function';
+  if(incomeHidden() || calm || heroShown === null || heroShown === v){
+    if(typeof cancelAnimationFrame === 'function') cancelAnimationFrame(heroAnimRaf);
+    heroShown = v; el.textContent = fmtInc(v); return;
+  }
+  const from = heroShown, start = performance.now(), dur = 700;
+  cancelAnimationFrame(heroAnimRaf);
+  const step = (now)=>{
+    const p = Math.min((now - start) / dur, 1), e = 1 - Math.pow(1 - p, 3);
+    heroShown = from + (v - from) * e;
+    el.textContent = fmtInc(heroShown);
+    if(p < 1) heroAnimRaf = requestAnimationFrame(step);
+    else { heroShown = v; el.textContent = fmtInc(v); }
+  };
+  heroAnimRaf = requestAnimationFrame(step);
+}
+
+document.getElementById('incomeNudgeBtn')?.addEventListener('click', ()=>{
+  document.querySelector('.nav-btn[data-view="settings"]').click();
+  setTimeout(()=>{ const i = document.getElementById('incomeInput'); if(i){ i.scrollIntoView && i.scrollIntoView({block:'center'}); i.focus(); } }, 150);
+});
+
 function renderDashboard(){
   const income = combinedIncome();
   const spent = totalSpent();
   const savingsContrib = savingsContribThisCycle();
-  const remaining = Math.max(income - spent - savingsContrib, 0);
+  const remaining = income - spent - savingsContrib; // may go below zero
   const budget = totalBudget();
 
   document.getElementById('cycleLabel').textContent = cycleLabelText();
@@ -1455,7 +1486,7 @@ function renderDashboard(){
     document.getElementById('daysLeft').textContent = daysLeft;
     document.getElementById('statSafePerDay').textContent = fmtInc(remainingBudget/Math.max(daysLeft,1));
   }
-  document.getElementById('safeToday').textContent = fmtInc(remaining);
+  setHeroBalance(remaining);
 
   const grandTotal = budget + totalSavingsBudget();
   const bc = document.getElementById('budgetCheck');
@@ -1467,6 +1498,9 @@ function renderDashboard(){
   state.categories.forEach(c=>{ const st = statusForAmt(c, spentMap[c.id]||0); if(st.cls==='st-over' || st.cls==='st-near') alerts++; });
   document.getElementById('alertCount').textContent = alerts;
 
+  const nudge = document.getElementById('incomeNudge');
+  if(nudge) nudge.style.display = (Number(state.income||0) <= 0 && extraTotal() <= 0) ? '' : 'none';
+
   renderExtraIncome();
   renderCategoryList(spentMap);
   renderTxPreview();
@@ -1474,6 +1508,7 @@ function renderDashboard(){
   renderWeekdayChart();
   renderTrendChart();
   renderBillReminders();
+  renderLoanDueAlerts();
   renderMoneyWeather(income, spent, budget, alerts);
   renderFxStrip();
 }
@@ -1801,7 +1836,8 @@ function renderCategoryList(spentMap){
     const status = statusForAmt(cat, spent);
     const rolloverNote = rollover>0 ? ` <span style="color:var(--teal);">(+${fmt(rollover)} rollover)</span>` : '';
     const div = document.createElement('div');
-    div.className = 'cat';
+    div.className = 'cat clickable';
+    div.setAttribute('role','button');
     div.innerHTML = `
       <div class="cat-top">
         <div style="display:flex;align-items:center;">
@@ -1822,9 +1858,42 @@ function renderCategoryList(spentMap){
         <span style="font-size:10px;color:var(--muted);">${budget>0?Math.round(pct*100):0}% used</span>
       </div>
     `;
+    div.addEventListener('click', ()=>openCatRecent(cat.id));
     list.appendChild(div);
   });
 }
+
+const catRecentSheet = document.getElementById('catRecentSheet');
+let catRecentId = null;
+function recentTxForCat(catId, n){
+  return state.transactions.filter(t=>t.categoryId===catId)
+    .sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
+    .slice(0, n);
+}
+function openCatRecent(catId){
+  const cat = catById(catId); if(!cat) return;
+  catRecentId = catId;
+  const all = state.transactions.filter(t=>t.categoryId===catId);
+  document.getElementById('catRecentTitle').textContent = (cat.icon ? cat.icon + ' ' : '') + cat.name;
+  document.getElementById('catRecentSummary').textContent =
+    fmt(spentFor(catId)) + ' of ' + fmt(effectiveBudget(cat)) + ' · ' + all.length + (all.length === 1 ? ' expense' : ' expenses') + ' this cycle';
+  const list = document.getElementById('catRecentList');
+  const recent = recentTxForCat(catId, 3);
+  list.innerHTML = recent.length ? recent.map(t=>{
+    const meta = [escapeHtml(histDateLabel(t.date) || t.date || '')];
+    if(t.method) meta.push(escapeHtml(t.method));
+    return '<div class="pay-hist-row"><div><div class="tx-desc">' + (escapeHtml(t.desc) || 'No description') + '</div><div class="ph-meta">' + meta.join(' · ') + '</div></div><div class="ph-amt">' + fmt(t.amount) + '</div></div>';
+  }).join('') : '<div class="empty-hist" style="margin:0;">Nothing logged here yet this cycle.</div>';
+  activeSheet = catRecentSheet; openSheetEl(catRecentSheet);
+}
+document.getElementById('catRecentCloseBtn').addEventListener('click', ()=>{ closeSheetEl(catRecentSheet); activeSheet = null; });
+document.getElementById('catRecentAddBtn').addEventListener('click', ()=>{
+  const id = catRecentId;
+  closeSheetEl(catRecentSheet); activeSheet = null;
+  document.getElementById('fabAdd').click();
+  const sel = document.getElementById('txCategory');
+  if(sel && id) { sel.value = id; sel.dispatchEvent(new Event('change')); }
+});
 
 function renderTxPreview(){
   const wrap = document.getElementById('txListPreview');
@@ -2096,6 +2165,98 @@ function renderDebtTab(){
 /* ============================================================
    RENDER: LOANS (LENT OUT) TRACKER
    ============================================================ */
+/* ---- Loan repayment dates and alerts ----
+   A due date is kept on the loan itself and mirrored in a small per-device map,
+   so it still shows after a sync that returns loans without the field. */
+const LOAN_DUE_KEY = 'budget-cockpit-loan-due';
+function loanDueMap(){ try{ return JSON.parse(localStorage.getItem(LOAN_DUE_KEY) || '{}') || {}; }catch(e){ return {}; } }
+function loanDueOf(loan){ return (loan && (loan.dueDate || loanDueMap()[loan.id])) || ''; }
+function saveLoanDue(loanId, date){
+  const m = loanDueMap();
+  if(date) m[loanId] = date; else delete m[loanId];
+  try{ localStorage.setItem(LOAN_DUE_KEY, JSON.stringify(m)); }catch(e){}
+  const loan = loanById(loanId);
+  if(loan){ if(date) loan.dueDate = date; else delete loan.dueDate; }
+}
+function daysUntilDate(dateStr){
+  const t = new Date(); t.setHours(0,0,0,0);
+  const d = new Date(dateStr + 'T00:00:00');
+  return Math.round((d - t) / 86400000);
+}
+function dueWhenText(days){
+  if(days < 0) return 'Overdue by ' + Math.abs(days) + (days === -1 ? ' day' : ' days');
+  if(days === 0) return 'Due today';
+  if(days === 1) return 'Due tomorrow';
+  return 'Due in ' + days + ' days';
+}
+// Loans with money still owed and a date that is overdue or within 3 days.
+function loansDueSoon(){
+  const out = [];
+  state.loans.forEach(l=>{
+    const due = loanDueOf(l);
+    if(!due || remainingForLoan(l) <= 0) return;
+    const days = daysUntilDate(due);
+    if(days <= 3) out.push({loan: l, due, days});
+  });
+  return out.sort((a,b)=>a.days - b.days);
+}
+function renderLoanDueAlerts(){
+  const wrap = document.getElementById('loanDueAlerts');
+  if(!wrap) return;
+  const due = loansDueSoon();
+  if(!due.length){ wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = due.map(x=>`
+    <div class="bill-pill loan-due-pill">
+      <span>${x.days < 0 ? '⚠ ' : ''}${dueWhenText(x.days)}</span>
+      <b>${escapeHtml(x.loan.borrower)}</b> owes you ${fmt(remainingForLoan(x.loan))}
+    </div>`).join('');
+}
+const loanAlertSheet = document.getElementById('loanAlertSheet');
+function maybeShowLoanDuePopup(){
+  const due = loansDueSoon();
+  if(!due.length) return;
+  const today = toDateInput(new Date());
+  let seen = '';
+  try{ seen = localStorage.getItem('budget-cockpit-loan-alert-day') || ''; }catch(e){}
+  if(seen === today) return;
+  if(overlay.classList.contains('show') || tourActive) return;
+  try{ localStorage.setItem('budget-cockpit-loan-alert-day', today); }catch(e){}
+  document.getElementById('loanAlertList').innerHTML = due.map(x=>
+    '<div class="pay-hist-row"><div><div>' + escapeHtml(x.loan.borrower) + '</div><div class="ph-meta">' + dueWhenText(x.days) + ' · ' + escapeHtml(histDateLabel(x.due) || x.due) + '</div></div><div class="ph-amt">' + fmt(remainingForLoan(x.loan)) + '</div></div>'
+  ).join('');
+  activeSheet = loanAlertSheet; openSheetEl(loanAlertSheet);
+}
+document.getElementById('loanAlertCloseBtn').addEventListener('click', ()=>{ closeSheetEl(loanAlertSheet); activeSheet = null; });
+document.getElementById('loanAlertOpenBtn').addEventListener('click', ()=>{
+  closeSheetEl(loanAlertSheet); activeSheet = null;
+  document.querySelector('.nav-btn[data-view="finance"]').click();
+  setFinanceTab('loans');
+});
+
+const loanDueSheet = document.getElementById('loanDueSheet');
+let dueLoanId = null;
+function openLoanDueSheet(loanId){
+  dueLoanId = loanId;
+  const loan = loanById(loanId);
+  document.getElementById('loanDueTitle').textContent = 'Repayment date, ' + (loan ? loan.borrower : '');
+  document.getElementById('loanDueInput').value = loanDueOf(loan) || '';
+  activeSheet = loanDueSheet; openSheetEl(loanDueSheet);
+}
+document.getElementById('loanDueCancelBtn').addEventListener('click', ()=>{ closeSheetEl(loanDueSheet); activeSheet = null; dueLoanId = null; });
+document.getElementById('loanDueClearBtn').addEventListener('click', ()=>{
+  if(dueLoanId) saveLoanDue(dueLoanId, '');
+  closeSheetEl(loanDueSheet); activeSheet = null; dueLoanId = null;
+  saveState(); renderAll(); showToast('Repayment date removed');
+});
+document.getElementById('loanDueSaveBtn').addEventListener('click', ()=>{
+  const v = document.getElementById('loanDueInput').value;
+  if(!v){ showToast('Pick a date or tap Remove date'); return; }
+  if(dueLoanId) saveLoanDue(dueLoanId, v);
+  closeSheetEl(loanDueSheet); activeSheet = null; dueLoanId = null;
+  saveState(); renderAll(); showToast('Repayment date saved');
+});
+
 function renderLoanTab(){
   const loaned = totalLoaned(), repaid = totalLoanRepaid(), remaining = totalLoanRemaining();
   document.getElementById('loanSummary').innerHTML = `
@@ -2125,11 +2286,13 @@ function renderLoanTab(){
         <div class="debt-amt">${rem<=0 ? (lwo>0 ? '🧾 Settled' : '✅ Repaid') : fmt(rem)+' left'}</div>
       </div>
       <div class="debt-reason">${escapeHtml(loan.reason)||'—'}</div>
+      ${(()=>{ const due = loanDueOf(loan); if(!due) return ''; const days = daysUntilDate(due); const late = rem>0 && days<0, soon = rem>0 && days>=0 && days<=3; return '<div class="loan-due-line' + (late?' late':soon?' soon':'') + '">📅 Promised ' + escapeHtml(histDateLabel(due)||due) + (rem>0 ? ' · ' + dueWhenText(days) : '') + '</div>'; })()}
       ${lwo>0 ? `<div class="debt-wo">Written off ${fmt(lwo)}${loan.writtenOffDate ? ' on '+escapeHtml(histDateLabel(loan.writtenOffDate)) : ''}</div>` : ''}
       <div class="debt-bar-track"><div class="debt-bar-fill" style="width:${pct*100}%;"></div></div>
       <div class="debt-foot"><span>${Math.round(pct*100)}% repaid</span><span>Lent: ${fmt(leff)}${lwo>0 ? ' (of '+fmt(loan.amount)+')' : ''}</span></div>
       <div class="debt-actions">
         ${rem>0 ? `<button class="debt-btn-pay" data-repay="${loan.id}">Log repayment</button>` : ''}
+        ${rem>0 ? `<button class="debt-btn-edit" data-loandue="${loan.id}">${loanDueOf(loan) ? 'Change date' : 'Set date'}</button>` : ''}
         ${rem>0 ? `<button class="debt-btn-edit" data-writeoff="loan:${loan.id}">Write off</button>` : ''}
         ${lwo>0 ? `<button class="debt-btn-edit" data-unwriteoff="loan:${loan.id}">Undo write-off</button>` : ''}
         <button class="debt-btn-adjust" data-adjustloan="${loan.id}" data-name="${escapeHtml(loan.borrower)}" aria-label="Adjust for a repayment made previously" title="Log a repayment from a past cycle">✎</button>
@@ -2142,6 +2305,7 @@ function renderLoanTab(){
     div.addEventListener('click', (e)=>{ if(e.target.closest('button')) return; openPayHistory('loan', loan.id); });
   });
   listWrap.querySelectorAll('[data-repay]').forEach(b=>b.addEventListener('click', ()=>openLoanRepaySheet(b.dataset.repay)));
+  listWrap.querySelectorAll('[data-loandue]').forEach(b=>b.addEventListener('click', ()=>openLoanDueSheet(b.dataset.loandue)));
   listWrap.querySelectorAll('[data-adjustloan]').forEach(b=>b.addEventListener('click', ()=>{
     openAdjustSheet({
       type: 'loan', id: b.dataset.adjustloan,
@@ -2172,12 +2336,15 @@ document.getElementById('addLoanBtn').addEventListener('click', ()=>{
   if(!borrower){ showToast('Enter who you lent to'); return; }
   if(!amount || amount<=0){ showToast('Enter a valid amount lent'); return; }
   const newLoan = { id: uniqueId('loan'), borrower, reason, amount };
+  const dueVal = document.getElementById('newLoanDue').value;
   state.loans.push(newLoan);
+  if(dueVal) saveLoanDue(newLoan.id, dueVal);
   saveState(); renderAll();
   queueLoanDebtOp('addLoan', {loan: newLoan});
   document.getElementById('newLoanBorrower').value='';
   document.getElementById('newLoanReason').value='';
   document.getElementById('newLoanAmount').value='';
+  document.getElementById('newLoanDue').value='';
   showToast('Loan added');
 });
 
@@ -3181,6 +3348,46 @@ function refreshLoanLinkField(t){
 
 const addSheet = document.getElementById('addSheet');
 let editingTxId = null;
+
+// The descriptions you use most, offered as one-tap chips under the field.
+// Counted across this cycle and past cycles, case-insensitively; the chosen
+// category's own favourites come first, then your overall favourites.
+function descCounts(catId){
+  const map = new Map();
+  const bump = (t)=>{
+    const raw = String(t.desc || '').trim();
+    if(!raw || raw.length > 60) return;
+    if(catId && t.categoryId !== catId) return;
+    const key = raw.toLowerCase();
+    const cur = map.get(key) || {text: raw, n: 0};
+    cur.n++; map.set(key, cur);
+  };
+  (state.transactions||[]).forEach(bump);
+  (state.history||[]).slice(-6).forEach(h=>(h.transactions||[]).forEach(bump));
+  return map;
+}
+function topDescriptions(catId, typed, limit){
+  const q = String(typed || '').trim().toLowerCase();
+  const rank = (m)=>[...m.entries()].filter(([k])=>!q || (k.includes(q) && k !== q)).sort((a,b)=>b[1].n - a[1].n).map(([,v])=>v.text);
+  const out = [];
+  rank(descCounts(catId)).concat(rank(descCounts(null))).forEach(t=>{
+    if(out.length < limit && !out.some(x=>x.toLowerCase() === t.toLowerCase())) out.push(t);
+  });
+  return out;
+}
+function refreshDescSuggest(){
+  const wrap = document.getElementById('descSuggest');
+  if(!wrap) return;
+  if(privacyMode){ wrap.innerHTML = ''; return; } // descriptions are hidden while figures are
+  const tops = topDescriptions(document.getElementById('txCategory').value, document.getElementById('txDesc').value, 3);
+  wrap.innerHTML = tops.map(t=>'<button type="button" class="desc-chip">' + escapeHtml(t) + '</button>').join('');
+  wrap.querySelectorAll('.desc-chip').forEach((b, i)=>b.addEventListener('click', ()=>{
+    document.getElementById('txDesc').value = tops[i];
+    refreshDescSuggest();
+  }));
+}
+document.getElementById('txDesc').addEventListener('input', refreshDescSuggest);
+document.getElementById('txCategory').addEventListener('change', refreshDescSuggest);
 document.getElementById('fabAdd').addEventListener('click', ()=>{
   editingTxId = null;
   document.getElementById('addSheetTitle').textContent = 'Log an expense';
@@ -3195,6 +3402,7 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   refreshDebtLinkField();
   refreshLoanLinkField();
   hhPrepareSheet(null);
+  refreshDescSuggest();
   activeSheet = addSheet; openSheetEl(addSheet);
 });
 function openEditTx(t){
@@ -3211,6 +3419,7 @@ function openEditTx(t){
   refreshDebtLinkField(t.debtId);
   refreshLoanLinkField(t);
   hhPrepareSheet(t);
+  refreshDescSuggest();
   activeSheet = addSheet; openSheetEl(addSheet);
 }
 document.getElementById('txCancelBtn').addEventListener('click', ()=>{ closeSheetEl(addSheet); activeSheet=null; editingTxId=null; });
@@ -3703,7 +3912,7 @@ function buildReportData(snapshot){
   const spent = txs.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
   const budget = snapshot ? (snapshot.budget!=null ? snapshot.budget : 0) : totalBudget();
   const savingsContrib = txs.filter(t=>isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-  const remaining = Math.max(income - spent - savingsContrib, 0);
+  const remaining = income - spent - savingsContrib; // may go below zero
   const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
 
   const catSpentMap = {};
@@ -3910,7 +4119,7 @@ function updateWhatIf(){
   const spent = totalSpent();
   const savingsContrib = savingsContribThisCycle();
   const newSpent = spent - saved;
-  const newRemaining = Math.max(income - newSpent - savingsContrib, 0);
+  const newRemaining = income - newSpent - savingsContrib;
   const newSavingsRate = income>0 ? Math.round(((income - newSpent - savingsContrib)/income)*100) : 0;
   const oldSavingsRate = income>0 ? Math.round(((income - spent - savingsContrib)/income)*100) : 0;
 
@@ -3991,7 +4200,7 @@ function openYearReport(year){
   const allTx = [];
   entries.forEach(h => (h.transactions||[]).forEach(t => allTx.push(t)));
   const spent = allTx.filter(t=>!isSavingsCat(t.categoryId)).reduce((s,t)=>s+Number(t.amount),0);
-  const remaining = Math.max(income - spent - savingsContrib, 0);
+  const remaining = income - spent - savingsContrib; // may go below zero
   const savingsRate = income>0 ? Math.round((savingsContrib/income)*100) : 0;
 
   const yearSpentMap = {};
@@ -5665,9 +5874,9 @@ const TOUR_STEPS = [
   { sel:'.nav-btn[data-view="finance"]', view:'dashboard', title:'Finance', text:'Track money you owe (Debt), savings goals, and money you\'ve lent out. Tap any debt or loan to see its payment history.' },
   { sel:'.nav-btn[data-view="history"]', view:'dashboard', title:'History', text:'Look back at past pay cycles, charts, and every transaction in the current one.' },
   { sel:'.nav-btn[data-view="guide"]', view:'dashboard', title:'Guide', text:'Answers to common questions, and this tour whenever you want to see it again.' },
-  { sel:'.nav-btn[data-view="settings"]', view:'dashboard', title:'Settings — start here', text:'Set your income and how you\'re paid (salary or wages), category budgets, a PIN or fingerprint login, daily reminders and reports. Set your income first and everything else fills in.' },
+  { sel:'.nav-btn[data-view="settings"]', view:'dashboard', title:'Settings — start here', text:'Set your income and how you\'re paid (salary or wages), category budgets, a PIN or fingerprint login, daily reminders and reports. Adding your income is optional: without it the balance simply shows what you have spent as a negative number.' },
   { sel:'#householdSettingsCard', view:'settings', title:'Budgeting for a household? 🏡', text:'Switch on Household budget here to add the people you share money with. Then every expense asks who spent it, the Dashboard shows spending by person, and one tap adds categories like school fees and generator fuel. It is still one budget on one login.' },
-  { title:'You\'re all set 🎉', text:'Start by opening Settings to enter your income, then log your first expense with the + button.', view:'dashboard' },
+  { title:'You\'re all set 🎉', text:'Open Settings to add your income whenever you like (it is optional), then log your first expense with the + button.', view:'dashboard' },
 ];
 let tourIdx = 0, tourActive = false, tourChecked = false;
 let tourList = TOUR_STEPS; // the steps that apply right now (some only show in certain situations)
