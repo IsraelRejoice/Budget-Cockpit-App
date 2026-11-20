@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.16.2';
+window.__APP_VERSION = '1.16.3';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -2171,13 +2171,46 @@ function renderDebtTab(){
 const LOAN_DUE_KEY = 'budget-cockpit-loan-due';
 function loanDueMap(){ try{ return JSON.parse(localStorage.getItem(LOAN_DUE_KEY) || '{}') || {}; }catch(e){ return {}; } }
 function loanDueOf(loan){ return (loan && (loan.dueDate || loanDueMap()[loan.id])) || ''; }
+const LOAN_DUE_DIRTY_KEY = 'budget-cockpit-loan-due-dirty';
+let ldPushing = false, ldTimer = 0;
+function ldDirty(){ try{ return localStorage.getItem(LOAN_DUE_DIRTY_KEY) === '1'; }catch(e){ return false; } }
+function ldSetDirty(v){ try{ if(v) localStorage.setItem(LOAN_DUE_DIRTY_KEY, '1'); else localStorage.removeItem(LOAN_DUE_DIRTY_KEY); }catch(e){} }
 function saveLoanDue(loanId, date){
   const m = loanDueMap();
   if(date) m[loanId] = date; else delete m[loanId];
   try{ localStorage.setItem(LOAN_DUE_KEY, JSON.stringify(m)); }catch(e){}
   const loan = loanById(loanId);
   if(loan){ if(date) loan.dueDate = date; else delete loan.dueDate; }
+  ldSetDirty(true);
+  clearTimeout(ldTimer); ldTimer = setTimeout(ldPush, 800);
 }
+// Dates sync through their own small endpoint (loan_due_schema.sql). If it has not
+// been set up on the server yet, everything keeps working from this device's copy.
+async function ldPush(){
+  if(ldPushing || !ldDirty()) return;
+  if(!navigator.onLine || !sessionToken) return;
+  ldPushing = true;
+  try{
+    const ids = new Set((state.loans || []).map(l=>l.id));
+    const m = loanDueMap(), keep = {};
+    Object.keys(m).forEach(k=>{ if(ids.has(k)) keep[k] = m[k]; });
+    const r = await apiPost('loanDueSave', { dates: keep });
+    if(r && r.ok) ldSetDirty(false);
+  }catch(e){}
+  ldPushing = false;
+}
+async function ldPull(){
+  if(!navigator.onLine || !sessionToken) return;
+  try{
+    if(ldDirty()){ await ldPush(); return; }
+    const r = await apiPost('loanDueGet', {});
+    if(r && r.dates && typeof r.dates === 'object' && !r.error){
+      try{ localStorage.setItem(LOAN_DUE_KEY, JSON.stringify(r.dates)); }catch(e){}
+      renderAll();
+    }
+  }catch(e){}
+}
+window.addEventListener('online', ()=>{ if(sessionToken && ldDirty()) ldPush(); });
 function daysUntilDate(dateStr){
   const t = new Date(); t.setHours(0,0,0,0);
   const d = new Date(dateStr + 'T00:00:00');
@@ -6307,7 +6340,7 @@ async function hhPull(){
   }catch(e){ hh.syncOk = false; }
   renderAll();
 }
-function hhInit(){ hhLoadLocal(); hhRender(); hhPull(); }
+function hhInit(){ hhLoadLocal(); hhRender(); hhPull(); ldPull(); }
 window.addEventListener('online', ()=>{ if(sessionToken && hh.dirty) hhPush(); });
 
 boot().catch(e=>{
