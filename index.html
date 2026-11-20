@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<meta name="app-version" content="1.16.0">
+<meta name="app-version" content="1.16.2">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -820,6 +820,41 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
   .cat-delete:hover, .tx-del:hover{opacity:.7;}
   .debt-actions button:hover{filter:brightness(1.08);}
 }
+
+/* v1.16.2: hero motion, tappable categories, description chips, loan dates */
+.hero-card > *:not(.hero-fx){position:relative;z-index:1;}
+.hero-fx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0;border-radius:inherit;}
+.hero-fx .coin{position:absolute;bottom:-14px;width:12px;height:12px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, rgba(255,255,255,.75), rgba(255,194,77,.55) 55%, rgba(255,194,77,.15));
+  opacity:0;animation:coinRise 9s linear infinite;}
+.hero-fx .c1{left:8%;animation-delay:0s;}
+.hero-fx .c2{left:27%;animation-delay:2.4s;width:9px;height:9px;animation-duration:11s;}
+.hero-fx .c3{left:52%;animation-delay:4.8s;}
+.hero-fx .c4{left:73%;animation-delay:1.3s;width:8px;height:8px;animation-duration:10s;}
+.hero-fx .c5{left:90%;animation-delay:6.2s;width:10px;height:10px;}
+@keyframes coinRise{0%{transform:translateY(0) scale(.7);opacity:0;}12%{opacity:.8;}80%{opacity:.5;}100%{transform:translateY(-190px) scale(1.1);opacity:0;}}
+.hero-wave{position:absolute;left:0;bottom:0;width:200%;height:46px;}
+.hero-wave path{fill:rgba(255,255,255,.07);}
+.hero-wave .w1{animation:waveSlide 9s linear infinite;}
+.hero-wave .w2{fill:rgba(0,229,199,.08);animation:waveSlide 14s linear infinite reverse;}
+@keyframes waveSlide{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+.hero-card .hero-bar-fill{background-image:linear-gradient(90deg,transparent 0,rgba(255,255,255,.35) 50%,transparent 100%);background-size:60px 100%;background-repeat:no-repeat;animation:barShine 2.8s ease-in-out infinite;}
+@keyframes barShine{from{background-position:-60px 0;}to{background-position:240px 0;}}
+.hero-card.hero-neg .hero-num{color:#FFB4AE;}
+.hero-card.hero-neg .hero-fx .coin{background:radial-gradient(circle at 35% 30%, rgba(255,255,255,.7), rgba(255,59,48,.5) 55%, rgba(255,59,48,.12));}
+.hero-nudge{font-size:11.5px;line-height:1.5;color:var(--muted);margin-top:14px;padding:9px 11px;border-radius:12px;background:rgba(255,255,255,.1);}
+.hero-nudge button{background:none;border:0;color:var(--gold);font-weight:700;font-size:11.5px;cursor:pointer;padding:0 0 0 4px;font-family:inherit;}
+@media (prefers-reduced-motion: reduce){.hero-fx .coin,.hero-wave path,.hero-card .hero-bar-fill{animation:none;}.hero-fx .coin{display:none;}}
+.cat.clickable{cursor:pointer;}
+.desc-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.desc-chips:empty{display:none;}
+.desc-chip{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:16px;padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.desc-chip:active{transform:scale(.96);}
+.loan-due-line{font-size:11.5px;color:var(--muted);margin:2px 0 6px;}
+.loan-due-line.soon{color:var(--gold);font-weight:600;}
+.loan-due-line.late{color:var(--red);font-weight:600;}
+.loan-due-pill{background:rgba(255,194,77,.1);border-color:rgba(255,194,77,.35);}
+.loan-due-pill span{color:var(--gold);}
 </style>
 </head>
 <body>
@@ -959,12 +994,17 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     </div>
 
     <div class="hero-card">
+      <div class="hero-fx" aria-hidden="true">
+        <i class="coin c1"></i><i class="coin c2"></i><i class="coin c3"></i><i class="coin c4"></i><i class="coin c5"></i>
+        <svg class="hero-wave" viewBox="0 0 400 60" preserveAspectRatio="none"><path class="w1" d="M0 30 Q 50 6 100 30 T 200 30 T 300 30 T 400 30 V60 H0Z"/><path class="w2" d="M0 38 Q 50 16 100 38 T 200 38 T 300 38 T 400 38 V60 H0Z"/></svg>
+      </div>
       <div class="hero-lbl">Available this cycle
         <button class="hero-hide-btn" id="heroHideBtn" type="button" aria-label="Hide this balance" title="Hide just this balance">👁️</button>
       </div>
       <div class="hero-num mono" id="safeToday">—</div>
       <div class="hero-bar-track"><div class="hero-bar-fill" id="heroBarFill"></div></div>
       <div class="hero-sub"><span id="heroSubSpent">—</span><span id="gaugePct">0% of budget</span></div>
+      <div class="hero-nudge" id="incomeNudge" style="display:none;">No income added yet. Spending shows as a negative balance until you add it. <button type="button" id="incomeNudgeBtn">Add income</button></div>
       <div class="hero-stats">
         <div class="pace-badge" id="paceBadge">On track</div>
         <div class="hero-stat">Income <b id="statIncome">—</b></div>
@@ -1023,6 +1063,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
 
     <div class="badge-row" id="badgeRow" style="display:none;"></div>
     <div class="bill-reminders" id="billReminders" style="display:none;"></div>
+    <div class="bill-reminders" id="loanDueAlerts" style="display:none;"></div>
 
     <button class="whatif-btn" id="whatIfBtn">🔮 What if I cut a category?</button>
 
@@ -1147,6 +1188,10 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
           <label>Amount lent ₦</label>
           <input type="number" id="newLoanAmount" min="0" step="1" placeholder="0">
         </div>
+        <div class="field">
+          <label>Promised repayment date (optional)</label>
+          <input type="date" id="newLoanDue">
+        </div>
         <button class="btn btn-primary" id="addLoanBtn">Add loan</button>
       </div>
     </div>
@@ -1185,7 +1230,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div class="guide-block">
       <h3>Getting started</h3>
       <div class="faq-item"><div class="faq-q">How do I get started?</div>
-        <div class="faq-a">Create your account with an email and password (a quick “verify you’re human” check may appear). A short tour then points out the main buttons — you can replay it any time with the button at the top of this Guide tab. After that, open Settings and: pick your currency, choose how you’re paid (salary or wages), enter your income, and set a budget for each category. Until you choose how you’re paid, no payday is assumed — the Dashboard shows a “Set up how you’re paid” card instead of a countdown. Everything else updates automatically as you log expenses. Each new account starts with 17 ready-made categories (including separate Emergency Fund, Savings and Investments pots) you can rename, re-budget, add to or remove.</div></div>
+        <div class="faq-a">Create your account with an email and password (a quick “verify you’re human” check may appear). A short tour then points out the main buttons — you can replay it any time with the button at the top of this Guide tab. After that, open Settings and: pick your currency, choose how you’re paid (salary or wages), enter your income if you want to (it is optional), and set a budget for each category. Without income the balance on the dashboard shows what you have spent as a negative number; it fixes itself once you add income. Until you choose how you’re paid, no payday is assumed — the Dashboard shows a “Set up how you’re paid” card instead of a countdown. Everything else updates automatically as you log expenses. Each new account starts with 17 ready-made categories (including separate Emergency Fund, Savings and Investments pots) you can rename, re-budget, add to or remove.</div></div>
       <div class="faq-item"><div class="faq-q">What’s the difference between “Salary” and “Wages”?</div>
         <div class="faq-a"><b>Salary</b> means a fixed payday each month (you choose the day, 1–28). Your cycle runs from one payday to the next, and the Dashboard shows the days left and your safe-to-spend-per-day. <b>Wages</b> means no fixed schedule: your cycle starts when you start it and runs until you end it yourself with “Archive this cycle &amp; start fresh” in Settings. Nothing is archived automatically, and because there’s no end date to measure against, the Dashboard shows “Cycle day” instead of a countdown, pace badge or per-day allowance. You can switch in Settings at any time; switching to Wages starts a new open-ended cycle from today.</div></div>
       <div class="faq-item"><div class="faq-q">Why does my payday move around? (Salary)</div>
@@ -1699,7 +1744,8 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
   </div>
   <div class="field">
     <label>Description</label>
-    <input type="text" id="txDesc" placeholder="e.g. Bolt ride to work">
+    <input type="text" id="txDesc" placeholder="e.g. Bolt ride to work" autocomplete="off">
+    <div class="desc-chips" id="descSuggest"></div>
   </div>
   <div class="field">
     <label>Date</label>
@@ -1913,6 +1959,34 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
 </div>
 
 <!-- Report sheet -->
+<div class="sheet" id="catRecentSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="catRecentTitle">Category</h3>
+  <p id="catRecentSummary" style="font-size:12px;color:var(--muted);margin:-6px 0 10px;line-height:1.5;"></p>
+  <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">Latest 3 expenses</div>
+  <div id="catRecentList"></div>
+  <button class="btn btn-primary" id="catRecentAddBtn" style="margin-top:12px;">Add expense here</button>
+  <button class="btn btn-ghost" id="catRecentCloseBtn" style="margin-top:8px;">Close</button>
+</div>
+
+<div class="sheet" id="loanDueSheet">
+  <div class="sheet-handle"></div>
+  <h3 id="loanDueTitle">Repayment date</h3>
+  <div class="field"><label>Date they promised to pay back</label><input type="date" id="loanDueInput"></div>
+  <button class="btn btn-primary" id="loanDueSaveBtn">Save date</button>
+  <button class="btn btn-ghost" id="loanDueClearBtn" style="margin-top:8px;">Remove date</button>
+  <button class="btn btn-ghost" id="loanDueCancelBtn" style="margin-top:8px;">Cancel</button>
+</div>
+
+<div class="sheet" id="loanAlertSheet">
+  <div class="sheet-handle"></div>
+  <h3>Loan repayments to follow up</h3>
+  <p style="font-size:12px;color:var(--muted);margin:-6px 0 10px;line-height:1.5;">These are due within 3 days or already late.</p>
+  <div id="loanAlertList" style="max-height:48vh;overflow-y:auto;"></div>
+  <button class="btn btn-primary" id="loanAlertOpenBtn" style="margin-top:12px;">Open loans</button>
+  <button class="btn btn-ghost" id="loanAlertCloseBtn" style="margin-top:8px;">Dismiss</button>
+</div>
+
 <div class="sheet" id="reportSheet">
   <div class="sheet-handle"></div>
   <h3 id="reportTitle">Cycle report</h3>
