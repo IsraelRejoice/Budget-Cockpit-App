@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<meta name="app-version" content="1.16.3">
+<meta name="app-version" content="1.17.0">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com;
@@ -888,6 +888,7 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
     <div class="lock-spinner" id="lockSpinner" style="display:none;"></div>
     <div class="lock-checking-text" id="lockCheckingText" style="display:none;">Checking your details…</div>
     <div class="lock-error" id="lockError"></div>
+    <div style="margin-top:14px;font-size:11px;text-align:center;"><a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted);">Privacy policy</a></div>
   </div>
 </div>
 
@@ -1308,6 +1309,8 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
         <div class="faq-a">Your budget belongs to your account. Row-level security in the database keeps other people who sign up from ever seeing your categories, transactions, debts or loans, and regular use of the app never exposes one person’s data to another. As with any hosted service, the app’s operator administers the database and retains standard administrative access to the infrastructure it runs on.</div></div>
       <div class="faq-item"><div class="faq-q">How can I sign in?</div>
         <div class="faq-a">With your email and password, or — once you’ve set them up in Settings → Security — a 6-digit PIN or your phone’s fingerprint / face unlock. On the login screen, switch between Password, PIN and Biometrics with the tabs. Your password always works. PIN and biometrics are conveniences for getting back in on a device that already has your login saved, so a brand-new device always needs your password first.</div></div>
+      <div class="faq-item"><div class="faq-q">How do I delete my account and my data?</div>
+        <div class="faq-a">Go to Settings → Your data → Delete my account. You confirm with your password and by typing DELETE. Everything in the account is erased from the server straight away: expenses, budgets, history, debts, loans, household, reminders and share links. It cannot be undone. If you can no longer sign in, follow the steps on the delete-account page linked from the privacy policy.</div></div>
       <div class="faq-item"><div class="faq-q">What’s the difference between “Lock app now” and “Sign out completely”?</div>
         <div class="faq-a">If you’ve set a PIN or biometrics, “Lock app now” hides your data and keeps your login on this device so you can get back in with any method. “Sign out completely” ends your login on the server and clears it from the device — use it before handing your phone to someone or on a device you don’t trust. Without a PIN or biometrics, “Lock app now” signs you out. The app also locks itself after 5 minutes of inactivity.</div></div>
       <div class="faq-item"><div class="faq-q">What if I forget my PIN or password?</div>
@@ -1632,6 +1635,15 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
         Your budget is private to your account. Row-level security in the database keeps every other person who signs up from ever seeing your categories, transactions, debts, or loans — regular use of the app never exposes one person's data to another, even by accident.
         As with any hosted service, the underlying database is administered by the app's operator, who retains standard administrative access to the infrastructure it runs on (the same way any app's operator technically can, whether or not they ever do). This isn't a bank or a regulated custodian — treat it as a personal budgeting tool, not a place to store anything you wouldn't want on a personal spreadsheet.
       </p>
+    </div>
+
+    <div class="section"><h2>Your data</h2></div>
+    <div style="margin:0 20px 20px;">
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;">
+        Your budget lives in your own private account. You can delete the account and everything in it at any time.
+        Read how your data is handled in the <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--gold);">privacy policy</a>.
+      </p>
+      <button class="btn btn-ghost" id="deleteAccountBtn" type="button" style="color:var(--red);">Delete my account</button>
     </div>
 
     <div class="section"><h2>About</h2></div>
@@ -1985,6 +1997,22 @@ body.privacy-on #personalNotesInput{filter:blur(7px);pointer-events:none;user-se
   <div id="loanAlertList" style="max-height:48vh;overflow-y:auto;"></div>
   <button class="btn btn-primary" id="loanAlertOpenBtn" style="margin-top:12px;">Open loans</button>
   <button class="btn btn-ghost" id="loanAlertCloseBtn" style="margin-top:8px;">Dismiss</button>
+</div>
+
+<div class="sheet" id="deleteAccountSheet">
+  <div class="sheet-handle"></div>
+  <h3>Delete your account</h3>
+  <p style="font-size:12.5px;color:var(--muted);line-height:1.55;margin:-4px 0 12px;">
+    This permanently deletes your login and everything in your account: expenses, budgets, history, debts, loans, household, reminders and share links.
+    It cannot be undone and nobody can recover it afterwards. Export or share a report first if you want a copy.
+  </p>
+  <div class="field"><label>Signed in as</label><div id="deleteEmail" style="font-size:14px;padding:4px 0;"></div></div>
+  <div class="field"><label>Your password</label><input type="password" id="deletePassword" autocomplete="current-password"></div>
+  <div class="field"><label>Type DELETE to confirm</label><input type="text" id="deleteConfirmInput" autocomplete="off" autocapitalize="characters"></div>
+  <div id="turnstileDeleteBox" style="margin:8px 0;"></div>
+  <div id="deleteError" style="color:var(--red);font-size:12px;min-height:16px;margin-bottom:6px;"></div>
+  <button class="btn btn-primary" id="deleteAccountGoBtn" type="button" style="background:var(--red);">Delete everything permanently</button>
+  <button class="btn btn-ghost" id="deleteAccountCancelBtn" type="button" style="margin-top:8px;">Cancel</button>
 </div>
 
 <div class="sheet" id="reportSheet">
