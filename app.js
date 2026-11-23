@@ -7,7 +7,7 @@
    lifts. index.html carries <meta name="app-version">; if it doesn't match
    this file, clear the caches and reload once with a cache-busting URL.
    ============================================================ */
-window.__APP_VERSION = '1.16.3';
+window.__APP_VERSION = '1.17.0';
 (function versionHandshake(){
   var meta = document.querySelector('meta[name="app-version"]');
   if(meta && meta.getAttribute('content') === window.__APP_VERSION) return;
@@ -5440,6 +5440,60 @@ document.getElementById('lockNowBtn').addEventListener('click', ()=>{
   if(!API_URL){ showToast('No backend connected — nothing to lock'); return; }
   if(quickSignInEnabled()) softLockNow(); else lockNow();
 });
+/* ---- Delete account (required by Google Play and the App Store) ---- */
+const deleteAccountSheet = document.getElementById('deleteAccountSheet');
+let deleteEmailShown = '', deleteBusy = false;
+function deleteErr(m){ document.getElementById('deleteError').textContent = m || ''; }
+document.getElementById('deleteAccountBtn')?.addEventListener('click', async ()=>{
+  if(!navigator.onLine){ showToast('Connect to the internet to delete your account'); return; }
+  document.getElementById('deletePassword').value = '';
+  document.getElementById('deleteConfirmInput').value = '';
+  deleteErr('');
+  deleteEmailShown = '';
+  try{ const r = await apiPost('whoami', {}); deleteEmailShown = (r && r.email) || ''; }catch(e){}
+  if(!deleteEmailShown){ showToast('Could not read your account. Check your connection and try again.'); return; }
+  document.getElementById('deleteEmail').textContent = deleteEmailShown;
+  ensureTurnstileWidget('turnstileDeleteBox');
+  activeSheet = deleteAccountSheet; openSheetEl(deleteAccountSheet);
+});
+document.getElementById('deleteAccountCancelBtn')?.addEventListener('click', ()=>{ closeSheetEl(deleteAccountSheet); activeSheet = null; });
+document.getElementById('deleteAccountGoBtn')?.addEventListener('click', async ()=>{
+  if(deleteBusy) return;
+  const pw = document.getElementById('deletePassword').value;
+  if(document.getElementById('deleteConfirmInput').value.trim() !== 'DELETE'){ deleteErr('Type DELETE (capital letters) to confirm.'); return; }
+  if(!pw){ deleteErr('Enter your password.'); return; }
+  if(!navigator.onLine){ deleteErr('You are offline. Connect and try again.'); return; }
+  deleteBusy = true; deleteErr('');
+  const btn = document.getElementById('deleteAccountGoBtn'); btn.disabled = true; btn.textContent = 'Deleting…';
+  try{
+    const captcha = await turnstileFieldsReady('turnstileDeleteBox');
+    if(captcha === null){ deleteErr('Verification is still loading. Please try again in a moment.'); return; }
+    // Re-check the password with the real login. That also mints a fresh token,
+    // which the server requires before it will delete anything.
+    const res = await fetchWithTimeout(AUTH_URL + '/token?grant_type=password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY},
+      body: JSON.stringify(Object.assign({ email: deleteEmailShown, password: pw }, captcha))
+    }, 15000);
+    resetTurnstile('turnstileDeleteBox');
+    const data = await res.json();
+    if(!(res.ok && data && data.access_token)){ deleteErr('That password is not correct.'); return; }
+    storeSession(data);
+    const r = await apiPost('deleteAccount', { confirm: 'DELETE' });
+    if(r && r.ok){
+      try{ localStorage.clear(); }catch(e){}
+      try{ sessionStorage.clear(); sessionStorage.setItem('pendingLockMessage', 'Your account and all its data have been deleted.'); }catch(e){}
+      location.reload();
+      return;
+    }
+    deleteErr((r && r.error) || 'Could not delete the account. Nothing was changed if this message stays.');
+  }catch(e){
+    deleteErr(e && e.name === 'AbortError' ? 'The request timed out. Try again.' : 'Could not reach the server. Try again.');
+  }finally{
+    deleteBusy = false; btn.disabled = false; btn.textContent = 'Delete everything permanently';
+  }
+});
+
 document.getElementById('signOutFullBtn')?.addEventListener('click', ()=>{
   if(!API_URL){ showToast('No backend connected — nothing to sign out of'); return; }
   lockNow();
